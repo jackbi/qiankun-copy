@@ -1,3 +1,5 @@
+import { pendingStylesheetFill } from '@qiankunjs/shared';
+
 type Writable = {
   write: (html: string) => void;
   abort: (err: Error) => void;
@@ -117,22 +119,6 @@ function writableDOM(
           pendingText = node as Text;
         } else {
           pendingText = null;
-
-          if (isBlocking(clone)) {
-            isBlocked = true;
-            // eslint-disable-next-line @typescript-eslint/no-loop-func
-            clone.onload = clone.onerror = () => {
-              isBlocked = false;
-              // Continue the normal content injecting walk.
-              if (clone.parentNode) walk();
-            };
-          }
-
-          // document.importNode will reset the `async` attribute to true, here we need to set it manually.
-          // see https://github.com/marko-js/writable-dom/issues/7
-          if (isSyncScript(clone)) {
-            clone.async = false;
-          }
         }
 
         const parentNode = targetNodes.get(node.parentNode!)!;
@@ -144,8 +130,43 @@ function writableDOM(
           appendInlineTextIfNeeded(previousPendingText, inlineHostNode, assetTransformer);
           inlineHostNode = null;
 
+          // Transform FIRST: a transformer may swap the node for a different tag (e.g.
+          // <link rel="stylesheet"> -> inline <style> under style isolation), and all the
+          // blocking/async bookkeeping below must apply to the node that actually gets inserted —
+          // wiring it to a discarded clone would leave the walk permanently blocked.
           if (typeof assetTransformer === 'function') {
-            clone = assetTransformer(clone);
+            const transformed = assetTransformer(clone);
+            if (transformed !== clone) {
+              targetNodes.set(node, transformed);
+              clone = transformed;
+            }
+          }
+
+          const pendingLoad = getPendingLoad(clone);
+          if (isBlocking(clone)) {
+            isBlocked = true;
+            // eslint-disable-next-line @typescript-eslint/no-loop-func
+            (clone as HTMLElement).onload = (clone as HTMLElement).onerror = () => {
+              isBlocked = false;
+              // Continue the normal content injecting walk.
+              if (clone.parentNode) walk();
+            };
+          } else if (pendingLoad) {
+            // A swapped stylesheet placeholder still filling asynchronously (style isolation):
+            // keep the native "stylesheets block later scripts" ordering until the fill settles.
+            isBlocked = true;
+            // eslint-disable-next-line @typescript-eslint/no-loop-func
+            const unblock = () => {
+              isBlocked = false;
+              if (clone.parentNode) walk();
+            };
+            void pendingLoad.then(unblock, unblock);
+          }
+
+          // document.importNode will reset the `async` attribute to true, here we need to set it manually.
+          // see https://github.com/marko-js/writable-dom/issues/7
+          if (isSyncScript(clone)) {
+            clone.async = false;
           }
 
           if (parentNode === target) {
@@ -166,6 +187,19 @@ function writableDOM(
 }
 
 export default writableDOM as WritableDOM;
+
+/**
+ * Cross-package contract with @qiankunjs/shared's link transpiler: a swapped stylesheet
+ * placeholder carries a promise (under the pendingStylesheetFill symbol) that settles once
+ * its CSS text has been fetched and filled in — the walk stays blocked until then to preserve
+ * the native "stylesheets block later scripts" ordering.
+ */
+function getPendingLoad(node: Node): Promise<unknown> | undefined {
+  const pending = (node as unknown as Record<symbol, unknown>)[pendingStylesheetFill];
+  return pending && typeof (pending as Promise<unknown>).then === 'function'
+    ? (pending as Promise<unknown>)
+    : undefined;
+}
 
 function isBlocking(node: any): node is HTMLElement {
   return (
