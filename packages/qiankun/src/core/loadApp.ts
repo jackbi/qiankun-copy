@@ -30,7 +30,8 @@ import {
   performanceMeasure,
   toArray,
 } from '../utils';
-import { version } from '../version';
+
+declare const __QIANKUN_VERSION__: string;
 
 export type ParcelConfigObjectGetter = (remountContainer: HTMLElement) => ParcelConfigObject;
 
@@ -184,7 +185,9 @@ export default async function loadApp<T extends ObjectType>(
         },
         // exec the chain after rendering to keep the behavior with beforeLoad
         async () => execHooksChain(toArray(beforeMount), app, global),
-        async (props) => mount({ ...props, container: mountContainer }),
+        async (props) => {
+          await mount({ ...props, container: mountContainer });
+        },
         // finish loading after app mounted
         async () => execHooksChain(toArray(afterMount), app, global),
         async () => {
@@ -200,7 +203,9 @@ export default async function loadApp<T extends ObjectType>(
 
       unmount: [
         async () => execHooksChain(toArray(beforeUnmount), app, global),
-        async (props) => unmount({ ...props, container: mountContainer }),
+        async (props) => {
+          await unmount({ ...props, container: mountContainer });
+        },
         unmountSandbox,
         async () => execHooksChain(toArray(afterUnmount), app, global),
         async () => {
@@ -247,7 +252,7 @@ function initContainer(
   initializedContainers.add(container);
 
   container.dataset.name = appName;
-  container.dataset.version = version;
+  container.dataset.version = __QIANKUN_VERSION__;
   container.dataset.sandboxCfg = JSON.stringify(sandboxCfg);
 
   if (mountTimes > 1) {

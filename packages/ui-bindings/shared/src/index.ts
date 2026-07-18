@@ -1,6 +1,6 @@
 import type { AppConfiguration, MicroApp as MicroAppTypeDefinition, LifeCycles } from 'qiankun';
 import { loadMicroApp } from 'qiankun';
-import { mergeWith, concat, omit } from 'lodash';
+import { concat, mergeWith, omit } from 'lodash';
 import type { LifeCycleFn } from 'qiankun';
 
 export type MicroAppType = {
