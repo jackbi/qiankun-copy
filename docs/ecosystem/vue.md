@@ -1,1095 +1,285 @@
-# Vue Bindings
+# `<MicroApp>` for Vue (@qiankunjs/vue)
 
-The official Vue bindings for qiankun provide a declarative way to integrate micro applications into your Vue main application. The `@qiankunjs/vue` package offers a powerful `<MicroApp />` component with Vue 2/3 compatibility, composition API support, and slot-based customization.
+`@qiankunjs/vue` provides a `MicroApp` component that loads, mounts, updates, and unmounts a qiankun micro-app declaratively — the whole lifecycle is tied to the component's own lifecycle. It is a thin, reactive wrapper over [`loadMicroApp`](/api/load-micro-app) from the `qiankun` facade.
 
-## 📦 Installation
+The component is built on [`vue-demi`](https://github.com/vueuse/vue-demi), so a single build runs under both Vue 2 and Vue 3.
+
+## Installation
 
 ```bash
-npm install @qiankunjs/vue
+npm install @qiankunjs/vue@rc qiankun@rc
 ```
 
-**Requirements:**
-- Vue 2.0+ or Vue 3.0+ 
-- qiankun ≥ 3.0.0
-- For Vue 2, you may need `@vue/composition-api`
+`vue` is a peer dependency with the range `^2.0.0 || >=3.0.0`. Under Vue 2 you also need `@vue/composition-api` installed (the component uses the Composition API through `vue-demi`).
 
-## 🚀 Quick Start
+::: tip Prerequisite
+The `MicroApp` component calls `loadMicroApp` directly, so you do not need `registerMicroApps` or `start` for it. You still need [`start`](/api/start) if you also use route-based registration elsewhere in the same app. See [Micro-app lifecycle and props](/concepts/lifecycle-and-props) for how mount and update map to single-spa.
+:::
 
-### Vue 3 with Composition API
+## Basic usage
 
 ```vue
-<template>
-  <div class="main-app">
-    <h1>Main Application</h1>
-    <MicroApp 
-      name="dashboard" 
-      entry="//localhost:8080" 
-    />
-  </div>
-</template>
-
 <script setup>
 import { MicroApp } from '@qiankunjs/vue';
 </script>
-```
 
-### Vue 2 with Options API
-
-```vue
 <template>
-  <div class="main-app">
-    <h1>Main Application</h1>
-    <micro-app 
-      name="dashboard" 
-      entry="//localhost:8080" 
-    />
-  </div>
+  <micro-app name="app1" entry="http://localhost:8000" />
 </template>
-
-<script>
-import { MicroApp } from '@qiankunjs/vue';
-
-export default {
-  components: {
-    MicroApp
-  }
-}
-</script>
 ```
 
-### With Loading State
+`name` and `entry` are the only required props. `name` identifies the current instance, and `entry` is the micro-app's HTML entry URL. When either is missing, the component logs an error and does nothing; it does not throw.
+
+The component renders a single container `<div>` (class `qiankun-micro-app-container`) into which the micro-app is streamed. No wrapper element is added unless a loader or error boundary is active — see [Loading and error UI](#loading-and-error-ui).
+
+## Props
+
+| Prop | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | `string` | — | **Required.** The name of this micro-app instance; changing it remounts the component. |
+| `entry` | `string` | — | **Required.** HTML entry URL of the micro-app. |
+| `settings` | `AppConfiguration` | `{ sandbox: true }` | Loader/sandbox configuration forwarded to `loadMicroApp`. See [AppConfiguration](/api/configuration). |
+| `lifeCycles` | `LifeCycles` | `undefined` | Host-provided lifecycle hooks for this instance: `beforeLoad`, `beforeMount`, `afterMount`, `beforeUnmount`, and `afterUnmount`. Each field accepts a function or an array of functions. See [Lifecycle hooks](/api/lifecycles). |
+| `autoSetLoading` | `boolean` | `false` | Render the built-in loading indicator while the micro-app loads. |
+| `autoCaptureError` | `boolean` | `false` | Render the built-in error boundary when loading fails. |
+| `wrapperClassName` | `string` | `undefined` | Extra class on the wrapper element. Only takes effect when a loader or error boundary is active. |
+| `className` | `string` | `undefined` | Extra class on the mount container element. |
+| `appProps` | `object` | `undefined` | Props passed through to the micro-app. This is the only channel for passing data to the sub-app in the Vue binding. |
+
+::: info `settings` default differs from React
+The Vue binding defaults `settings` to `{ sandbox: true }`. The [React binding](/ecosystem/react) has no `settings` default — nothing is defaulted on your behalf there. Either way `sandbox` defaults to `true` at the facade level, so the two bindings behave the same unless you pass something else.
+:::
+
+::: warning Pass application data through `appProps`
+Unlike the React binding, the Vue binding does not forward arbitrary attributes to the micro-app. Put application data inside `appProps`. The current implementation also forwards `autoSetLoading`, `autoCaptureError`, and the `appProps` object itself; application code should not depend on these component-control fields.
+:::
+
+### `settings` (AppConfiguration)
+
+`settings` accepts the same object as the second argument of [`loadMicroApp`](/api/load-micro-app). The full shape is documented in [AppConfiguration](/api/configuration); the fields are exactly `fetch`, `streamTransformer`, `nodeTransformer`, and `sandbox` (default `true`). Style isolation, extra globals, the incubator context, and isolation plugins all live inside the `sandbox` object.
 
 ```vue
 <template>
-  <MicroApp 
-    name="dashboard" 
-    entry="//localhost:8080" 
-    auto-set-loading
+  <micro-app
+    name="app1"
+    entry="http://localhost:8000"
+    :settings="{ sandbox: { styleIsolation: true } }"
   />
 </template>
+```
 
+To turn the JS sandbox off for a specific micro-app, pass `:settings="{ sandbox: false }"`. See [The JS sandbox](/concepts/js-sandbox) and [Style isolation](/concepts/style-isolation).
+
+## Passing props to the micro-app (`appProps`)
+
+Put the data the sub-app should receive inside `appProps`:
+
+```vue
+<script setup>
+import { reactive } from 'vue';
+import { MicroApp } from '@qiankunjs/vue';
+
+const appProps = reactive({ userId: 42, theme: 'dark' });
+</script>
+
+<template>
+  <micro-app name="app1" entry="http://localhost:8000" :appProps="appProps" />
+</template>
+```
+
+These reach the micro-app as the `props` argument of its exported lifecycles:
+
+```ts
+// inside the micro-app
+export async function mount(props) {
+  console.log(props.userId); // 42
+}
+```
+
+`appProps` is **deep-watched**. Mutating a nested value (for example `appProps.theme = 'light'`) triggers `microApp.update(props)` on the running instance, provided the micro-app exposes an `update` lifecycle, its status is `MOUNTED`, and it is not being unmounted. See [Share state and communicate between apps](/cookbook/communicate-between-apps).
+
+::: tip Updates only fire after mount
+`update` is serialized after the mount promise resolves, and only when the parcel status is `MOUNTED`. Intermediate prop changes during mounting are not guaranteed to produce a separate update for every change.
+:::
+
+## Loading and error UI
+
+Both the loading indicator and the error boundary are opt-in. When neither is enabled and no slots are provided, the component renders only the bare container `<div>`. When any of `autoSetLoading`, `autoCaptureError`, the `#loader` slot, or the `#error-boundary` slot is present, the component instead renders a wrapper element (class `qiankun-micro-app-wrapper`) that holds the loader/error nodes alongside the container.
+
+```mermaid
+flowchart TD
+  A[name changes / first mount] --> B[loading = true]
+  B --> C[mountMicroApp -> loadMicroApp]
+  C -->|mountPromise resolves| D{autoSetLoading?}
+  D -->|yes| E[loading = false, loader hidden]
+  D -->|no| F[loading is not cleared automatically]
+  C -->|load/bootstrap/mount rejects| G{error UI configured?}
+  G -->|yes| H[error set, boundary shown]
+  G -->|no| I[error re-thrown]
+```
+
+### Auto loading and error capture
+
+Enable the built-in indicators with the boolean props:
+
+```vue
 <script setup>
 import { MicroApp } from '@qiankunjs/vue';
 </script>
-```
 
-`autoSetLoading` renders the binding's built-in loading indicator. It is only needed for that indicator — a `loader` slot drives the loading state on its own, without the flag.
-
-### With Error Handling
-
-```vue
 <template>
-  <MicroApp 
-    name="dashboard" 
-    entry="//localhost:8080" 
-    auto-set-loading
-    auto-capture-error
+  <micro-app
+    name="app1"
+    entry="http://localhost:8000"
+    autoSetLoading
+    autoCaptureError
   />
 </template>
+```
 
+The built-ins are intentionally minimal: the default loader renders the text `loading...`, and the default error boundary renders a `<div>` containing `error.message`. For anything production-grade, use the slots below.
+
+::: info Initial loading state
+The Vue binding initializes `loading` to `false` (the React binding starts at `true`). The flag is set to `true` while the micro-app loads and cleared on the mount promise — but it is only auto-cleared when `autoSetLoading` is enabled. Without `autoSetLoading` no loader is rendered anyway.
+:::
+
+### Custom loader slot
+
+Provide a `#loader` scoped slot to render your own indicator. The component passes the `loading` boolean directly to the slot; it is `true` while loading and `false` once loading ends.
+
+```vue
 <script setup>
+import CustomLoader from '@/components/CustomLoader.vue';
 import { MicroApp } from '@qiankunjs/vue';
 </script>
-```
 
-Same story for errors: `autoCaptureError` renders the built-in error panel, and an `error-boundary` slot replaces it without the flag. With neither of them configured, a load or mount failure is thrown instead of being swallowed.
-
-## 🎯 Component API
-
-### Props
-
-| Prop | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `name` | `string` | ✅ | - | Unique name for the micro application. Changing it switches the mounted app |
-| `entry` | `string` | ✅ | - | Entry URL of the micro application. Read when the app mounts — see [Dynamic Entry URLs](#dynamic-entry-urls) |
-| `autoSetLoading` | `boolean` | ❌ | `false` | Render the built-in loading indicator |
-| `autoCaptureError` | `boolean` | ❌ | `false` | Render the built-in error panel |
-| `className` | `string` | ❌ | `undefined` | CSS class for the micro app container |
-| `wrapperClassName` | `string` | ❌ | `undefined` | CSS class for the wrapper, which only exists when a loading or error view is enabled |
-| `appProps` | `Record<string, any>` | ❌ | `undefined` | The micro application's own props: the *contents* of this object are forwarded, the object itself is not |
-| `settings` | `AppConfiguration` | ❌ | `{ sandbox: true }` | qiankun configuration for this micro app — sandbox, style isolation, fetch, … |
-| `lifeCycles` | `LifeCycles` | ❌ | `undefined` | qiankun lifecycle hooks for this micro app. They are captured on the first load into a given container, so avoid closing over component state in them |
-
-### Passing Props to the Micro Application
-
-`appProps` is the channel to the micro application. Every prop the component declares for itself — `name`, `entry`, `settings`, `lifeCycles`, `autoSetLoading`, `autoCaptureError`, `wrapperClassName`, `className` and `appProps` itself — is consumed by the binding and never reaches the micro app. Attributes the component does not declare are not forwarded either: Vue puts them on the rendered element as plain DOM attributes.
-
-Every change to `appProps` — whether you mutate it in place or hand over a new object — is passed to the micro app's `update` lifecycle, starting with the first change after mount. Apps that export no `update` lifecycle simply have nowhere for it to land.
-
-### Slots
-
-| Slot | Description | Slot props |
-|------|-------------|------------|
-| `loader` | Custom loading view | `{ loading: boolean }` |
-| `error-boundary` | Custom error view | `{ error: Error }` |
-
-Slot props arrive as an object, so destructure them: `#loader="{ loading }"` and `#error-boundary="{ error }"`. Vue does not normalize slot names, so the error slot is accepted under both spellings — `#error-boundary` and `#errorBoundary`.
-
-### Rendered Structure
-
-With a loading or error view enabled the component wraps the micro app container in an extra element:
-
-```vue
-<div :class="`${wrapperClassName} qiankun-micro-app-wrapper`">
-  <div :class="`${className} qiankun-micro-app-container`" />
-  <!-- the loader slot, or <MicroAppLoader /> when autoSetLoading is on -->
-  <!-- the error-boundary slot, or <ErrorBoundary /> when autoCaptureError is on -->
-</div>
-```
-
-The container is rendered first so its position never shifts as the loading and error views come and go — qiankun keys its per-container caches on that position. Because the two views come after the container, they paint above the micro app without needing a `z-index`. With neither view configured the component renders the container alone, without a wrapper.
-
-The wrapper carries no inline positioning, so if your loading or error view is an overlay, make the wrapper a containing block yourself through the class you pass as `wrapperClassName`:
-
-```vue
-<style scoped>
-:deep(.micro-app-wrapper) {
-  position: relative;
-}
-</style>
-```
-
-## 🎨 Customization
-
-### Custom Loading with Slots
-
-The slot receives the binding's own loading state, which ends as soon as the micro app reaches `MOUNTED`. Nothing else is needed to turn it off:
-
-```vue
 <template>
-  <MicroApp name="dashboard" entry="//localhost:8080">
-    <template #loader="{ loading }">
-      <div v-if="loading" class="custom-loader">
-        <div class="spinner"></div>
-        <p>Loading micro application...</p>
-      </div>
+  <micro-app name="app1" entry="http://localhost:8000" autoSetLoading>
+    <template #loader="loading">
+      <custom-loader :loading="loading" />
     </template>
-  </MicroApp>
+  </micro-app>
 </template>
+```
 
+A `#loader` slot takes precedence over the built-in loader. Keep `autoSetLoading` enabled if the component should automatically set `loading` to `false` when `mountPromise` resolves.
+
+### Custom error boundary slot
+
+Provide an `#error-boundary` scoped slot to render your own error UI. The component passes the `Error` instance directly to the slot, which is rendered only after an error occurs.
+
+```vue
 <script setup>
+import CustomErrorBoundary from '@/components/CustomErrorBoundary.vue';
 import { MicroApp } from '@qiankunjs/vue';
 </script>
 
-<style scoped>
-.custom-loader {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 50px;
-}
-
-.spinner {
-  width: 40px;
-  height: 40px;
-  border: 4px solid #f3f3f3;
-  border-top: 4px solid #3498db;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-</style>
-```
-
-### Custom Error Boundary
-
-```vue
 <template>
-  <MicroApp name="dashboard" entry="//localhost:8080">
-    <template #error-boundary="{ error }">
-      <div class="error-container">
-        <h3>🚨 Application Error</h3>
-        <p>{{ error.message }}</p>
-        <button @click="handleRetry">Retry</button>
-      </div>
+  <micro-app name="app1" entry="http://localhost:8000">
+    <template #error-boundary="error">
+      <custom-error-boundary :error="error" />
     </template>
-  </MicroApp>
+  </micro-app>
 </template>
+```
 
+### Uncaptured errors are re-thrown
+
+If you do **not** enable `autoCaptureError` and do **not** provide an `#error-boundary` slot, load, bootstrap, and mount errors are re-thrown from the asynchronous loading flow. Configure the built-in or custom error UI to prevent an unhandled promise rejection.
+
+::: warning
+Enabling `autoCaptureError` or supplying an `#error-boundary` slot switches error handling from "throw" to "render". Choose one strategy per micro-app; do not rely on an outer `errorCaptured` for errors you have already routed into a boundary. See [Handle load and runtime errors](/cookbook/handle-errors).
+:::
+
+## Remounting and the exposed handle
+
+The component watches `name` to trigger remounting: changing it unmounts the current micro-app and creates a new instance. Changing `entry`, `settings`, or `lifeCycles` alone does not create a new instance. Unmount is automatic when the component is destroyed (`onBeforeUnmount`), and it awaits the in-flight mount promise before unmounting so concurrent mount/unmount cycles stay ordered.
+
+The running micro-app instance is exposed on the component instance under two names, `microApp` and `microAppRef` (both point at the same [`MicroApp`](/api/types) parcel handle). Reach it through a template ref:
+
+```vue
 <script setup>
+import { ref, onMounted } from 'vue';
 import { MicroApp } from '@qiankunjs/vue';
 
-const handleRetry = () => {
-  window.location.reload();
-};
-</script>
-
-<style scoped>
-.error-container {
-  padding: 20px;
-  background: #fee;
-  border: 1px solid #fcc;
-  border-radius: 4px;
-  text-align: center;
-}
-
-button {
-  margin-top: 10px;
-  padding: 8px 16px;
-  background: #e74c3c;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-}
-</style>
-```
-
-### Styling
-
-```vue
-<template>
-  <MicroApp 
-    name="dashboard" 
-    entry="//localhost:8080" 
-    class-name="micro-app-container"
-    wrapper-class-name="micro-app-wrapper"
-    auto-set-loading
-  />
-</template>
-
-<style scoped>
-:deep(.micro-app-wrapper) {
-  /* the wrapper is not positioned by the binding, so overlay views need this */
-  position: relative;
-  border: 1px solid #e8e8e8;
-  border-radius: 6px;
-  overflow: hidden;
-}
-
-:deep(.micro-app-container) {
-  min-height: 400px;
-  background: #fafafa;
-}
-</style>
-```
-
-Both classes are additive: the binding always keeps `qiankun-micro-app-wrapper` on the wrapper and `qiankun-micro-app-container` on the container, so you can also style or query those directly.
-
-## 🔧 Advanced Usage
-
-### Sandbox and Style Isolation
-
-Everything qiankun itself can be configured with travels through `settings`: the JS sandbox, style isolation, `fetch`, … The default is `{ sandbox: true }` — JS sandbox on, style isolation off.
-
-```vue
-<template>
-  <MicroApp 
-    name="dashboard" 
-    entry="//localhost:8080" 
-    :settings="settings"
-  />
-</template>
-
-<script setup>
-import { MicroApp } from '@qiankunjs/vue';
-
-// a stable object, defined outside the render
-const settings = { sandbox: { styleIsolation: true } };
-</script>
-```
-
-`settings` is read when the app mounts, so a later change only takes effect on the next mount. See [Configuration](/api/configuration) for the full set of options.
-
-### Lifecycle Hooks
-
-`lifeCycles` are handed to qiankun as-is, for this micro app only:
-
-```vue
-<template>
-  <MicroApp 
-    name="dashboard" 
-    entry="//localhost:8080" 
-    :life-cycles="lifeCycles"
-  />
-</template>
-
-<script setup>
-import { MicroApp } from '@qiankunjs/vue';
-
-const lifeCycles = {
-  beforeLoad: async (app) => console.log('before load', app.name),
-  afterMount: async (app) => console.log('mounted', app.name),
-  beforeUnmount: async (app) => console.log('before unmount', app.name)
-};
-</script>
-```
-
-qiankun caches what it loaded — lifecycle hooks included — per micro app name and container, so the hooks captured on the first load into a given container are the ones that keep running for later mounts into it. Keep them free of component state: drive your UI from the `loader` and `error-boundary` slots instead of closing over reactive state in a hook.
-
-### Multiple Micro Apps with Tabs
-
-One component serves every tab. Changing `name` unmounts the previous app and mounts the next one — the two are serialized, so rapid clicking cannot race two apps into the same container, and no `key` is needed:
-
-```vue
-<template>
-  <div class="multi-app-container">
-    <div class="tabs">
-      <button 
-        v-for="app in apps" 
-        :key="app.name"
-        :class="{ active: active === app.name }"
-        @click="active = app.name"
-      >
-        {{ app.label }}
-      </button>
-    </div>
-    
-    <div class="tab-content">
-      <MicroApp 
-        :name="activeApp.name" 
-        :entry="activeApp.entry" 
-        auto-set-loading
-      />
-    </div>
-  </div>
-</template>
-
-<script setup>
-import { computed, ref } from 'vue';
-import { MicroApp } from '@qiankunjs/vue';
-
-const apps = [
-  { name: 'dashboard', label: 'Dashboard', entry: '//localhost:8080' },
-  { name: 'analytics', label: 'Analytics', entry: '//localhost:8081' },
-  { name: 'settings', label: 'Settings', entry: '//localhost:8082' }
-];
-
-const active = ref('dashboard');
-const activeApp = computed(() => apps.find((app) => app.name === active.value) ?? apps[0]);
-</script>
-
-<style scoped>
-.tabs {
-  display: flex;
-  border-bottom: 1px solid #ccc;
-}
-
-.tabs button {
-  padding: 10px 20px;
-  border: none;
-  background: none;
-  cursor: pointer;
-}
-
-.tabs button.active {
-  background: #007bff;
-  color: white;
-}
-
-.tab-content {
-  padding: 20px 0;
-}
-</style>
-```
-
-### Conditional Loading
-
-```vue
-<template>
-  <div>
-    <div v-if="!user">
-      <p>Please log in to continue</p>
-      <button @click="login">Login</button>
-    </div>
-    
-    <div v-else>
-      <button @click="toggleMicroApp">
-        {{ showMicroApp ? 'Hide' : 'Show' }} Micro App
-      </button>
-      
-      <MicroApp 
-        v-if="showMicroApp"
-        name="protected-app" 
-        entry="//localhost:8080" 
-        :app-props="{
-          userId: user.id,
-          permissions: user.permissions
-        }"
-        auto-set-loading
-        auto-capture-error
-      />
-    </div>
-  </div>
-</template>
-
-<script setup>
-import { ref, computed } from 'vue';
-import { MicroApp } from '@qiankunjs/vue';
-
-const user = ref(null);
-const showMicroApp = ref(false);
-
-const login = () => {
-  user.value = {
-    id: '123',
-    name: 'John Doe',
-    permissions: ['read', 'write']
-  };
-};
-
-const toggleMicroApp = () => {
-  showMicroApp.value = !showMicroApp.value;
-};
-</script>
-```
-
-### Dynamic Entry URLs
-
-`entry` is read when the app mounts, and the component only mounts a new app when `name` changes. Pointing `entry` at another URL while `name` stays the same therefore does nothing. Make the identity carry the variant, and the switch works:
-
-```vue
-<template>
-  <div>
-    <select v-model="environment">
-      <option value="development">Development</option>
-      <option value="staging">Staging</option>
-      <option value="production">Production</option>
-    </select>
-    
-    <MicroApp 
-      :name="`dynamic-app-${environment}`" 
-      :entry="entryUrls[environment]" 
-      :app-props="{ environment }"
-      auto-set-loading
-    />
-  </div>
-</template>
-
-<script setup>
-import { ref } from 'vue';
-import { MicroApp } from '@qiankunjs/vue';
-
-const environment = ref('development');
-
-const entryUrls = {
-  development: '//localhost:8080',
-  staging: '//staging.example.com',
-  production: '//app.example.com'
-};
-</script>
-```
-
-Re-creating the component with a `:key` is not a substitute: qiankun caches the loaded app per name **and** container position, so a re-created component with the same name in the same place is served the code of the entry that was loaded first. One name per entry is the rule.
-
-If the entry has to be discovered at runtime, resolve it before you render the component — for example behind a `v-if` — so the value is final by the time the app mounts.
-
-## 🎮 State Management
-
-### Using Pinia for State Sharing
-
-```vue
-<!-- Main App -->
-<template>
-  <div class="main-app">
-    <Navigation />
-    <MicroAppContainer />
-  </div>
-</template>
-
-<script setup>
-import { useAppStore } from '@/stores/app';
-
-const store = useAppStore();
-</script>
-```
-
-```typescript
-// stores/app.ts
-import { defineStore } from 'pinia';
-
-export const useAppStore = defineStore('app', {
-  state: () => ({
-    user: null,
-    theme: 'dark',
-    language: 'en'
-  }),
-  
-  actions: {
-    setUser(user) {
-      this.user = user;
-    },
-    
-    setTheme(theme) {
-      this.theme = theme;
-    }
-  }
-});
-```
-
-```vue
-<!-- MicroApp Container -->
-<template>
-  <MicroApp 
-    name="micro-app" 
-    entry="//localhost:8080" 
-    :app-props="appProps"
-    auto-set-loading
-  />
-</template>
-
-<script setup>
-import { computed } from 'vue';
-import { MicroApp } from '@qiankunjs/vue';
-import { useAppStore } from '@/stores/app';
-
-const store = useAppStore();
-
-const appProps = computed(() => ({
-  user: store.user,
-  theme: store.theme,
-  language: store.language
-}));
-</script>
-```
-
-A `computed` keeps the object identity stable until the values it depends on really change, so the micro app's `update` lifecycle runs once per change instead of once per re-render.
-
-### Communication Between Apps
-
-```vue
-<template>
-  <div class="app-communication">
-    <div class="app-container">
-      <h3>App 1</h3>
-      <MicroApp 
-        ref="microApp1"
-        name="app1" 
-        entry="//localhost:8080" 
-        auto-set-loading
-      />
-    </div>
-    
-    <div class="app-container">
-      <h3>App 2</h3>
-      <MicroApp 
-        ref="microApp2"
-        name="app2" 
-        entry="//localhost:8081" 
-        auto-set-loading
-      />
-    </div>
-  </div>
-</template>
-
-<script setup>
-import { ref, onMounted, onUnmounted } from 'vue';
-import { MicroApp } from '@qiankunjs/vue';
-
-const microApp1 = ref();
-const microApp2 = ref();
-
-const setupCommunication = () => {
-  // Set up global communication channel
-  window.appCommunication = {
-    sendMessage: (from, to, message) => {
-      const event = new CustomEvent('microAppMessage', {
-        detail: { from, to, message }
-      });
-      window.dispatchEvent(event);
-    }
-  };
-
-  // Listen for messages
-  const handleMessage = (event) => {
-    console.log('Message received:', event.detail);
-  };
-
-  window.addEventListener('microAppMessage', handleMessage);
-  
-  return () => {
-    window.removeEventListener('microAppMessage', handleMessage);
-    delete window.appCommunication;
-  };
-};
+const microAppComp = ref();
 
 onMounted(() => {
-  const cleanup = setupCommunication();
-  
-  onUnmounted(() => {
-    cleanup();
-  });
+  // parcel handle: getStatus(), mountPromise, unmount(), update(), ...
+  console.log(microAppComp.value?.microApp?.getStatus());
 });
 </script>
 
-<style scoped>
-.app-communication {
-  display: flex;
-  gap: 20px;
-}
-
-.app-container {
-  flex: 1;
-  border: 1px solid #ccc;
-  padding: 20px;
-}
-</style>
+<template>
+  <micro-app ref="microAppComp" name="app1" entry="http://localhost:8000" />
+</template>
 ```
 
-## 🔒 TypeScript Support
+The handle is a Parcel from `@qiankunjs/single-spa`, qiankun's vendored fork. Its `getStatus()` returns one of `NOT_LOADED`, `LOADING_SOURCE_CODE`, `NOT_BOOTSTRAPPED`, `BOOTSTRAPPING`, `NOT_MOUNTED`, `MOUNTING`, `MOUNTED`, `UPDATING`, `UNMOUNTING`, `UNLOADING`, `SKIP_BECAUSE_BROKEN`, or `LOAD_ERROR`. The full type is in the [Types reference](/api/types).
 
-### Typed Props with Vue 3
+::: tip Let the component own the lifecycle
+Prefer driving the micro-app through props (`name`, `appProps`) rather than calling `unmount()`/`update()` on the handle yourself. The component serializes unmounts and guards concurrent updates internally; manual calls can race with that bookkeeping.
+:::
+
+## CSS hooks
+
+The class names are identical to the React binding. Two stable hooks are always applied, and your `wrapperClassName` / `className` are prepended when provided.
+
+| Element | Always-applied class | Extra class from prop |
+| --- | --- | --- |
+| Wrapper (only when a loader or error boundary is active) | `qiankun-micro-app-wrapper` | `wrapperClassName` |
+| Mount container | `qiankun-micro-app-container` | `className` |
+
+```css
+/* target every micro-app mount container */
+.qiankun-micro-app-container {
+  min-height: 320px;
+}
+
+/* target the wrapper that holds loader + error UI */
+.qiankun-micro-app-wrapper {
+  position: relative;
+}
+```
+
+Because the wrapper element only exists when a loader or error boundary is active, `wrapperClassName` has no effect on a plain `<micro-app>` with no loading/error UI.
+
+## Full example
 
 ```vue
-<template>
-  <MicroApp 
-    name="user-profile" 
-    entry="//localhost:8080"
-    :app-props="userProps"
-    auto-set-loading
-  />
-</template>
-
-<script setup lang="ts">
-import { computed } from 'vue';
-import { MicroApp } from '@qiankunjs/vue';
-
-interface User {
-  id: string;
-  name: string;
-  email: string;
-}
-
-interface UserProfileProps {
-  userId: string;
-  theme: 'light' | 'dark';
-  permissions: string[];
-}
-
-const user: User = getCurrentUser();
-
-const userProps = computed<UserProfileProps>(() => ({
-  userId: user.id,
-  theme: 'dark',
-  permissions: user.permissions || []
-}));
-</script>
-```
-
-### Custom Composable for Micro App
-
-The component instance exposes the loaded app as `microApp`, and the binding only assigns it once the mount settles — it is still `undefined` synchronously inside `onMounted`. So track the reference instead of reading it once:
-
-```typescript
-// composables/useMicroApp.ts
-import { ref, watch, type Ref } from 'vue';
-import type { MicroApp as MicroAppType } from 'qiankun';
-
-type MicroAppInstance = { microApp?: MicroAppType } | null;
-
-export function useMicroApp(instance: Ref<MicroAppInstance>) {
-  const status = ref('NOT_LOADED');
-
-  const refresh = () => {
-    status.value = instance.value?.microApp?.getStatus() ?? 'NOT_LOADED';
-  };
-
-  // fires as soon as the app is handed over, and again whenever the app is swapped
-  watch(() => instance.value?.microApp, refresh);
-
-  return { status, refresh };
-}
-```
-
-```vue
-<template>
-  <div>
-    <p>Status: {{ status }}</p>
-    <button @click="refresh">Refresh status</button>
-    
-    <MicroApp 
-      ref="stage"
-      name="dashboard" 
-      entry="//localhost:8080" 
-      auto-set-loading
-    />
-  </div>
-</template>
-
-<script setup lang="ts">
-import { ref } from 'vue';
-import { MicroApp } from '@qiankunjs/vue';
-import { useMicroApp } from '@/composables/useMicroApp';
-
-const stage = ref(null);
-const { status, refresh } = useMicroApp(stage);
-</script>
-```
-
-Later transitions of the same instance — `MOUNTED` → `UNMOUNTING`, say — leave the reference untouched, which is what `refresh` is for. If all you need is "is this app up yet", read the `loader` slot's `loading` instead.
-
-## 🚀 Performance Optimization
-
-### Lazy Loading with Suspense
-
-```vue
-<template>
-  <Suspense>
-    <template #default>
-      <LazyMicroApp 
-        name="dashboard" 
-        entry="//localhost:8080" 
-        auto-set-loading
-      />
-    </template>
-    <template #fallback>
-      <div>Loading component...</div>
-    </template>
-  </Suspense>
-</template>
-
 <script setup>
-import { defineAsyncComponent } from 'vue';
-
-const LazyMicroApp = defineAsyncComponent(() =>
-  import('@qiankunjs/vue').then(module => module.MicroApp)
-);
-</script>
-```
-
-### Memoization with computed
-
-```vue
-<template>
-  <MicroApp 
-    name="optimized-app" 
-    entry="//localhost:8080" 
-    :app-props="memoizedProps"
-    auto-set-loading
-  />
-</template>
-
-<script setup>
-import { computed } from 'vue';
+import { reactive } from 'vue';
 import { MicroApp } from '@qiankunjs/vue';
+import Spinner from '@/components/Spinner.vue';
+import ErrorPanel from '@/components/ErrorPanel.vue';
 
-const props = defineProps(['user', 'settings']);
-
-const memoizedProps = computed(() => ({
-  userId: props.user?.id,
-  theme: props.settings?.theme,
-  language: props.settings?.language
-}));
+const appProps = reactive({ userId: 42 });
 </script>
-```
 
-`appProps` is watched deeply, so an inline object literal — a fresh object on every render — asks the micro app to `update` on every render. A `computed` (or a `reactive` object you mutate in place) narrows that down to real changes; in development the binding warns when updates arrive less than 200 ms apart.
-
-### Route-based Micro Apps
-
-Drive one component from your router instead of one per route: the route picks `name` and `entry`, leaving the route unmounts the component and with it the micro app. Because the container element stays in the same place, qiankun can take its warm remount path when the visitor comes back.
-
-```vue
 <template>
-  <!-- no `key`: the binding unmounts the previous app before mounting the next -->
-  <MicroApp 
-    v-if="app"
-    :name="app.name" 
-    :entry="app.entry" 
-    :settings="settings"
-    auto-set-loading
-  />
-  <p v-else>Pick a micro app.</p>
-</template>
-
-<script setup>
-import { computed } from 'vue';
-import { useRoute } from 'vue-router';
-import { MicroApp } from '@qiankunjs/vue';
-
-const microApps = [
-  { name: 'dashboard', path: '/dashboard', entry: '//localhost:8080' },
-  { name: 'analytics', path: '/analytics', entry: '//localhost:8081' }
-];
-
-const route = useRoute();
-const app = computed(() => microApps.find((item) => route.path.startsWith(item.path)));
-
-const settings = { sandbox: { styleIsolation: true } };
-</script>
-```
-
-`<keep-alive>` is not a way to suspend a micro app: the binding unmounts on the component's own unmount, which a cached route never reaches, so a kept-alive micro app keeps running in detached DOM. Let the route unmount the component.
-
-## 🐛 Error Handling & Debugging
-
-### Development Mode Error Handling
-
-```vue
-<template>
-  <MicroApp 
-    name="dashboard" 
-    entry="//localhost:8080" 
-    auto-set-loading
+  <micro-app
+    name="app1"
+    entry="http://localhost:8000"
+    :settings="{ sandbox: { styleIsolation: true } }"
+    :appProps="appProps"
+    autoSetLoading
+    wrapperClassName="my-wrapper"
+    className="my-container"
   >
-    <template #error-boundary="{ error }">
-      <ErrorDisplay :error="error" :is-development="isDevelopment" />
+    <template #loader="loading">
+      <spinner v-if="loading" />
     </template>
-  </MicroApp>
+    <template #error-boundary="error">
+      <error-panel :message="error.message" />
+    </template>
+  </micro-app>
 </template>
-
-<script setup>
-import { MicroApp } from '@qiankunjs/vue';
-import ErrorDisplay from '@/components/ErrorDisplay.vue';
-
-const isDevelopment = process.env.NODE_ENV === 'development';
-</script>
 ```
 
-```vue
-<!-- ErrorDisplay.vue -->
-<template>
-  <div class="error-container">
-    <div v-if="isDevelopment" class="dev-error">
-      <h3>🚨 Development Error</h3>
-      <pre>{{ error.stack }}</pre>
-      <button @click="reload">Reload App</button>
-    </div>
-    
-    <div v-else class="prod-error">
-      <h3>Something went wrong</h3>
-      <p>Please try again later.</p>
-      <button @click="reload">Retry</button>
-    </div>
-  </div>
-</template>
+## See also
 
-<script setup>
-defineProps(['error', 'isDevelopment']);
-
-const reload = () => {
-  window.location.reload();
-};
-</script>
-
-<style scoped>
-.error-container {
-  padding: 20px;
-  text-align: center;
-}
-
-.dev-error {
-  background: #ffe6e6;
-  border: 1px solid #ff9999;
-}
-
-.prod-error {
-  background: #f8f9fa;
-  border: 1px solid #dee2e6;
-}
-
-pre {
-  text-align: left;
-  background: #f5f5f5;
-  padding: 10px;
-  overflow: auto;
-}
-</style>
-```
-
-## 📚 Vue 2 Compatibility
-
-### Using with Vue 2
-
-```vue
-<template>
-  <div class="main-app">
-    <h1>Vue 2 Main Application</h1>
-    <micro-app 
-      name="dashboard" 
-      entry="//localhost:8080" 
-      :app-props="appProps"
-      auto-set-loading
-    >
-      <template v-slot:loader="{ loading }">
-        <div v-if="loading">Loading...</div>
-      </template>
-    </micro-app>
-  </div>
-</template>
-
-<script>
-import { MicroApp } from '@qiankunjs/vue';
-
-export default {
-  name: 'MainApp',
-  components: {
-    MicroApp
-  },
-  data() {
-    return {
-      user: {
-        id: '123',
-        name: 'John'
-      }
-    };
-  },
-  computed: {
-    appProps() {
-      return {
-        userId: this.user.id,
-        userName: this.user.name
-      };
-    }
-  }
-};
-</script>
-```
-
-### With Composition API in Vue 2
-
-```vue
-<template>
-  <micro-app 
-    name="dashboard" 
-    entry="//localhost:8080" 
-    :app-props="appProps"
-    auto-set-loading
-  />
-</template>
-
-<script>
-import { defineComponent, ref, computed } from '@vue/composition-api';
-import { MicroApp } from '@qiankunjs/vue';
-
-export default defineComponent({
-  components: {
-    MicroApp
-  },
-  setup() {
-    const user = ref({
-      id: '123',
-      name: 'John'
-    });
-
-    const appProps = computed(() => ({
-      userId: user.value.id,
-      userName: user.value.name
-    }));
-
-    return {
-      appProps
-    };
-  }
-});
-</script>
-```
-
-## 📚 Best Practices
-
-### 1. Use Descriptive Names
-
-```vue
-<!-- ✅ Good: Descriptive names -->
-<MicroApp name="user-dashboard" entry="//localhost:8080" />
-<MicroApp name="order-management" entry="//localhost:8081" />
-
-<!-- ❌ Bad: Generic names -->
-<MicroApp name="app1" entry="//localhost:8080" />
-<MicroApp name="app2" entry="//localhost:8081" />
-```
-
-### 2. Always Handle Loading States
-
-```vue
-<!-- ✅ Good: the built-in indicator -->
-<MicroApp name="dashboard" entry="//localhost:8080" auto-set-loading />
-
-<!-- ✅ Good: your own, no flag needed -->
-<MicroApp name="dashboard" entry="//localhost:8080">
-  <template #loader="{ loading }">
-    <CustomSpinner v-if="loading" />
-  </template>
-</MicroApp>
-
-<!-- ❌ Bad: No loading indication -->
-<MicroApp name="dashboard" entry="//localhost:8080" />
-```
-
-### 3. Implement Error Boundaries
-
-```vue
-<!-- ✅ Good: the built-in panel -->
-<MicroApp name="dashboard" entry="//localhost:8080" auto-capture-error />
-
-<!-- ✅ Good: your own, no flag needed -->
-<MicroApp name="dashboard" entry="//localhost:8080">
-  <template #error-boundary="{ error }">
-    <ErrorFallback :error="error" />
-  </template>
-</MicroApp>
-```
-
-### 4. Use Reactive Props
-
-```vue
-<!-- ✅ Good: Reactive props -->
-<MicroApp 
-  name="dashboard" 
-  entry="//localhost:8080" 
-  :app-props="reactiveProps"
-/>
-
-<script setup>
-import { computed } from 'vue';
-
-const reactiveProps = computed(() => ({
-  theme: store.theme,
-  user: store.user
-}));
-</script>
-```
-
-### 5. Environment-specific Configurations
-
-```vue
-<!-- ✅ Good: Environment-aware -->
-<template>
-  <MicroApp 
-    name="dashboard" 
-    :entry="config.entry"
-    :app-props="config.props"
-  />
-</template>
-
-<script setup>
-import { computed } from 'vue';
-
-const config = computed(() => {
-  const env = import.meta.env.MODE;
-  
-  return {
-    development: { 
-      entry: '//localhost:8080', 
-      props: { debug: true } 
-    },
-    production: { 
-      entry: '//app.example.com', 
-      props: { debug: false } 
-    }
-  }[env];
-});
-</script>
-```
-
-The mode is fixed for the lifetime of the page, so this resolves before the app mounts. Switching entries while the page is running is a different problem — see [Dynamic Entry URLs](#dynamic-entry-urls).
-
-## 📂 Working Examples
-
-Two shells in the repository host the same micro apps, each driving a single `<MicroApp />` from its own router — the route picks `name` and `entry`, leaving the route unmounts the app, and no `key` is involved:
-
-- `examples/vue-host` — the Vue shell: `settings`, `appProps` and both slots, with the wrapper positioned by the host, plus a deliberately unreachable route that shows the error slot (`examples/vue-host/src/Stage.vue`)
-- `examples/main` — the same stage built with the React bindings (`examples/main/src/components/Stage.tsx`)
-
-Run them with `pnpm run start:example` from the repository root.
-
-## 🔗 Related Documentation
-
-- [React Bindings](/ecosystem/react) - React UI bindings
-- [Core APIs](/api/) - qiankun core APIs
-- [Configuration](/api/configuration) - Configuration options
-- [Lifecycles](/api/lifecycles) - Lifecycle hooks
+- [`<MicroApp>` for React](/ecosystem/react) — the React binding and how its prop model differs.
+- [loadMicroApp](/api/load-micro-app) — the facade API this component wraps.
+- [AppConfiguration](/api/configuration) — the shape of `settings`.
+- [Micro-app lifecycle and props](/concepts/lifecycle-and-props) — mount/update/unmount semantics.
+- [Run multiple micro-app instances](/cookbook/run-multiple-instances) — mounting several micro-apps at once.

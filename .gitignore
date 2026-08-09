@@ -46,5 +46,8 @@ benchmark/results/
 # typescript incremental build info
 *.tsbuildinfo
 
+# VitePress build cache
+docs/.vitepress/cache
+
 # wrangler pages dev scratch (local simulation of the examples site)
 .wrangler/

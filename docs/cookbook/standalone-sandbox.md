@@ -10,7 +10,7 @@ The lower-level `Compartment` class is also public for hosts that need a Compart
 ## Install
 
 ```bash
-pnpm add @qiankunjs/sandbox
+pnpm add @qiankunjs/sandbox@rc
 ```
 
 The package is browser-only. It depends on DOM APIs, blob URLs, and dynamically injected import maps, so it must not be initialized during Node.js or SSR rendering.
@@ -280,7 +280,7 @@ After evaluation:
 - `sharedSettings.theme` is `"dark"` in both host and sandbox because the same object crossed the boundary.
 - DOM nodes, events, functions, and library instances likewise keep their identity; `===` and `instanceof` continue to work.
 
-This model is not suitable for hostile code. It does not harden objects, freeze intrinsics, create another origin, or impose an iframe/Worker callable boundary. Use those browser isolation mechanisms when code must not access host capabilities. The [Compartment Alignment RFC](/rfcs/compartment-alignment) explains this design boundary in detail.
+This model is not suitable for hostile code. It does not harden objects, freeze intrinsics, create another origin, or impose an iframe/Worker callable boundary. Use those browser isolation mechanisms when code must not access host capabilities. The [Compartment Alignment RFC](https://github.com/umijs/qiankun/blob/next/docs/rfcs/compartment-alignment.md) explains this design boundary in detail.
 
 ## Content Security Policy
 

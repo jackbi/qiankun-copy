@@ -1,83 +1,46 @@
-// .vitepress/theme/index.js
-import DefaultTheme from 'vitepress/theme';
-import { onMounted, nextTick } from 'vue';
+// qiankun docs theme — extends the VitePress default theme with the
+// 袖里乾坤 ("a universe in every sleeve") design language.
+//
+// Mermaid diagrams are rendered by vitepress-plugin-mermaid (wired in
+// config.mjs via withMermaid). No manual mermaid bootstrapping is needed.
+import DefaultTheme from 'vitepress/theme'
+import { h } from 'vue'
+import { useData } from 'vitepress'
+import './custom.css'
 
-let mermaidPromise;
+// Version banner: the site documents qiankun 3 while npm's `latest` tag still
+// resolves to 2.x, so every page states which major it covers and how to
+// install it. Drop this (and --vp-layout-top-height in custom.css) once 3.0
+// ships as `latest`.
+const VersionBanner = {
+  setup() {
+    const { lang } = useData()
+    return () =>
+      h('div', { class: 'qk-version-banner' }, [
+        lang.value.startsWith('zh')
+          ? h('span', [
+              '当前文档对应 qiankun 3.0（RC），安装请使用 ',
+              h('code', 'npm i qiankun@rc'),
+              '；2.x 文档见 ',
+              h('a', { href: 'https://v2.qiankun.umijs.org' }, 'v2 站点'),
+              '。',
+            ])
+          : h('span', [
+              'These docs cover qiankun 3.0 (RC) — install it with ',
+              h('code', 'npm i qiankun@rc'),
+              '. For 2.x, see the ',
+              h('a', { href: 'https://v2.qiankun.umijs.org' }, 'v2 docs'),
+              '.',
+            ]),
+      ])
+  },
+}
 
 export default {
   extends: DefaultTheme,
-  enhanceApp({ app, router }) {
-    // 路由变化时重新渲染 Mermaid
-    if (typeof window !== 'undefined') {
-      router.onAfterRouteChanged = () => {
-        nextTick(() => {
-          void renderMermaidCharts();
-        });
-      };
-    }
+  Layout() {
+    return h(DefaultTheme.Layout, null, {
+      'layout-top': () => h(VersionBanner),
+    })
   },
-  setup() {
-    onMounted(() => {
-      // 初始加载时渲染 Mermaid
-      setTimeout(() => {
-        void renderMermaidCharts();
-      }, 100);
-    });
-  },
-};
-
-async function renderMermaidCharts() {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  try {
-    mermaidPromise ??= import('mermaid').then(({ default: mermaid }) => mermaid);
-    const mermaid = await mermaidPromise;
-
-    // 初始化 mermaid
-    mermaid.initialize({
-      startOnLoad: false,
-      theme: 'default',
-    });
-
-    // 查找所有 mermaid 代码块
-    const mermaidElements = document.querySelectorAll('.language-mermaid > pre > code');
-
-    mermaidElements.forEach((element, index) => {
-      // 如果已经渲染过，跳过
-      if (element.getAttribute('data-processed') === 'true') {
-        return;
-      }
-
-      const code = element.textContent || element.innerText;
-      const uniqueId = `mermaid-${Date.now()}-${index}`;
-
-      // 创建容器
-      const container = document.createElement('div');
-      container.className = 'mermaid-container';
-      container.id = uniqueId;
-
-      // 渲染图表
-      mermaid
-        .render(uniqueId + '-svg', code)
-        .then(({ svg }) => {
-          container.innerHTML = svg;
-
-          // 替换原来的代码块
-          const codeBlock = element.closest('.language-mermaid');
-          if (codeBlock?.parentNode) {
-            codeBlock.parentNode.replaceChild(container, codeBlock);
-          }
-        })
-        .catch((error) => {
-          console.warn('Mermaid 渲染错误:', error);
-        });
-
-      // 标记为已处理
-      element.setAttribute('data-processed', 'true');
-    });
-  } catch (error) {
-    console.warn('Mermaid 初始化错误:', error);
-  }
 }

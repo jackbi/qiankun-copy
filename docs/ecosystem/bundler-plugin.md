@@ -1,173 +1,87 @@
-# Bundler Plugin
+# @qiankunjs/bundler-plugin
 
-The `@qiankunjs/bundler-plugin` provides bundler plugins for the qiankun micro-frontend framework. Currently it supports Webpack (4 & 5), with plans to support other bundlers like Vite and Turbopack in the future.
+`@qiankunjs/bundler-plugin` prepares a micro-app HTML Entry for qiankun. The host does not install it.
 
-## Installation
+The package provides separate Vite and Webpack plugins. Use the matching import path; the package does not auto-detect the bundler.
+
+## Install
 
 ```bash
-npm install @qiankunjs/bundler-plugin@rc --save-dev
-# or
-yarn add @qiankunjs/bundler-plugin@rc --dev
-# or
-pnpm add @qiankunjs/bundler-plugin@rc --save-dev
+npm install --save-dev @qiankunjs/bundler-plugin@rc
 ```
 
-## Webpack Plugin
+It supports Vite 5 and later and Webpack 4 / 5. Both peer dependencies are optional, so install only the bundler your project uses.
 
-### Features
+## Exports
 
-- **Automatic Library Configuration**: Sets the correct output library name and format for qiankun consumption
-- **Unique JSONP Function**: Ensures unique `jsonpFunction`/`chunkLoadingGlobal` names to prevent conflicts between micro applications
-- **Browser Compatibility**: Sets global object to `window` for proper browser execution
-- **Entry Script Marking**: Automatically adds `entry` attribute to the main entry script tag in HTML using webpack entrypoints
-- **Webpack 4 & 5 Support**: Compatible with both Webpack 4 and Webpack 5
-- **Zero Configuration**: Works out of the box with sensible defaults
+| Import path | Export | Purpose |
+| --- | --- | --- |
+| `@qiankunjs/bundler-plugin/vite` | `qiankun` (named and default) | Vite plugin |
+| `@qiankunjs/bundler-plugin` | `QiankunWebpackPlugin` (named and default) | Webpack plugin |
+| `@qiankunjs/bundler-plugin/webpack` | `QiankunWebpackPlugin` (named and default) | Explicit Webpack subpath |
 
-### Basic Usage
+## Vite
 
-```javascript
-// webpack.config.js
-const { QiankunWebpackPlugin } = require('@qiankunjs/bundler-plugin');
+The Vite plugin is a zero-option function:
 
-module.exports = {
-  entry: './src/index.js',
-  plugins: [
-    new QiankunWebpackPlugin()
-  ]
-};
+```ts
+import { qiankun } from '@qiankunjs/bundler-plugin/vite';
+import { defineConfig } from 'vite';
+
+export default defineConfig({
+  plugins: [qiankun()],
+  server: { port: 7101, strictPort: true },
+});
 ```
 
-This basic configuration will:
-- Use the `name` field from your `package.json` as the library name
-- Automatically mark the entry script tag with the `entry` attribute (based on webpack entrypoints)
-- Configure the output for qiankun consumption
+It has two observable effects:
 
-### With Custom Options
+- configures cross-origin response headers for the Vite dev and preview servers;
+- marks the entry module script in built HTML.
 
-```javascript
-// webpack.config.js
-const { QiankunWebpackPlugin } = require('@qiankunjs/bundler-plugin');
+The plugin takes no options and does not change micro-app lifecycle code. The entry module still exports `bootstrap`, `mount`, and `unmount`.
 
-module.exports = {
-  entry: './src/index.js',
-  plugins: [
-    new QiankunWebpackPlugin({
-      packageName: 'my-micro-app',
-    })
-  ]
-};
-```
+Development CORS configuration does not replace production server configuration. Deployed HTML, modules, and other assets must receive correct CORS and MIME headers from the real server or CDN.
 
-### Configuration Options
+See [Prepare a Vite app](/cookbook/prepare-a-vite-app) for the complete integration.
 
-#### `packageName` (optional)
+## Webpack
 
-- **Type**: `string`
-- **Default**: Value from `package.json` name field
-- **Description**: Specifies the name of the output library that qiankun will use to identify your micro application
+Use the Webpack plugin with `html-webpack-plugin` so it can produce an HTML Entry:
 
-### Framework Integration
-
-#### React (CRACO)
-
-```javascript
-// craco.config.js
-const { QiankunWebpackPlugin } = require('@qiankunjs/bundler-plugin');
-
-module.exports = {
-  webpack: {
-    configure: (webpackConfig) => {
-      webpackConfig.plugins.push(
-        new QiankunWebpackPlugin({
-          packageName: process.env.REACT_APP_NAME || 'react-app'
-        })
-      );
-      return webpackConfig;
-    }
-  }
-};
-```
-
-#### Vue CLI
-
-```javascript
-// vue.config.js
-const { QiankunWebpackPlugin } = require('@qiankunjs/bundler-plugin');
-
-module.exports = {
-  configureWebpack: {
-    plugins: [
-      new QiankunWebpackPlugin()
-    ]
-  },
-  devServer: {
-    port: 8080,
-    headers: {
-      'Access-Control-Allow-Origin': '*'
-    }
-  }
-};
-```
-
-#### Angular
-
-```javascript
-// custom-webpack.config.js
+```js
+const HtmlWebpackPlugin = require('html-webpack-plugin');
 const { QiankunWebpackPlugin } = require('@qiankunjs/bundler-plugin');
 
 module.exports = {
   plugins: [
-    new QiankunWebpackPlugin({
-      packageName: 'angular-micro-app'
-    })
-  ]
+    new HtmlWebpackPlugin({ template: './src/index.html' }),
+    new QiankunWebpackPlugin({ packageName: 'sub-app' }),
+  ],
 };
 ```
 
-### What the Plugin Does
-
-#### 1. Output Library Configuration
-
-**Webpack 4:**
-```javascript
-{
-  output: {
-    library: 'your-app-name',
-    libraryTarget: 'window',
-    jsonpFunction: 'webpackJsonp_your-app-name',
-    globalObject: 'window'
-  }
+```ts
+interface QiankunWebpackPluginOptions {
+  packageName?: string;
 }
 ```
 
-**Webpack 5:**
-```javascript
-{
-  output: {
-    library: {
-      name: 'your-app-name',
-      type: 'window'
-    }
-  }
-}
-```
+| Option | Default | Description |
+| --- | --- | --- |
+| `packageName` | current `package.json` name | Global library name for the Classic build output. |
 
-#### 2. Entry Script Marking
+The plugin configures the output as a browser global library and marks the entry script in the document produced by `html-webpack-plugin`. Keep a stable package name, and pass `packageName` explicitly when it cannot be read from `package.json`.
 
-The plugin uses webpack entrypoints to identify the main entry chunk and marks its script tag with `entry`. If multiple entrypoints exist, it matches by HTML filename; otherwise it falls back to the first entrypoint. If detection fails, it marks the last injected script.
+The Webpack plugin does not configure dev-server CORS. Both development and production servers must let the host fetch HTML, scripts, and styles across origins.
 
-### Troubleshooting
+See [Prepare a Webpack app](/cookbook/prepare-a-webpack-app) for the complete integration.
 
-- **Library Not Exposed**: Ensure `package.json` has a valid name field, or explicitly set `packageName` in plugin options.
-- **Entry Attribute Missing**: Verify `html-webpack-plugin` is present and the plugin is listed after it in `plugins`. The plugin relies on webpack `compilation.entrypoints` to find the main chunk.
+## Entry constraints
 
-## Related Documentation
+- An HTML Entry may contain at most one script with the `entry` attribute.
+- Do not add another marker by hand after the plugin has marked the entry.
+- The micro-app must export the [lifecycle contract](/concepts/lifecycle-and-props).
+- Production assets must satisfy browser CORS, CSP, and MIME requirements.
 
-- [Core APIs](/api/) - qiankun core APIs
-- [Create Qiankun](/ecosystem/create-qiankun) - Project scaffolding tool
-- [React Bindings](/ecosystem/react) - React UI bindings
-- [Vue Bindings](/ecosystem/vue) - Vue UI bindings
-
-## Contributing
-
-Found an issue or want to contribute? Check out the [GitHub repository](https://github.com/umijs/qiankun) and contribute to the `packages/bundler-plugin` directory.
+See [HTML Entry and execution](/concepts/html-entry-loading) for how the loader consumes the result.

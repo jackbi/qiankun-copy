@@ -1,357 +1,240 @@
 # registerMicroApps
 
-注册微应用到 qiankun 中，这是构建微前端应用的核心 API。
+Register micro-apps against the host by route. Every app is bound to an `activeRule`; qiankun mounts it when the URL matches and unmounts it when the URL stops matching.
 
-## 🎯 函数签名
+This is the route-driven alternative to [`loadMicroApp`](/api/load-micro-app). Use it only when the URL should completely determine whether an app is mounted. Prefer `loadMicroApp` for on-demand loading, component embedding, and apps controlled by host state.
 
-```typescript
+## Signature
+
+```ts
 function registerMicroApps<T extends ObjectType>(
-  apps: Array<RegistrableApp<T>>, 
-  lifeCycles?: LifeCycles<T>
+  apps: Array<RegistrableApp<T>>,
+  lifeCycles?: LifeCycles<T>,
 ): void
 ```
 
-## 📋 参数
+`registerMicroApps` only records these apps and hands them off to [single-spa](https://single-spa.js.org/). Nothing loads until you call [start](/api/start). Registration and activation are two separate steps:
 
-### apps
-
-- **类型**: `Array<RegistrableApp<T>>`
-- **必填**: ✅
-- **描述**: 微应用注册信息数组
-
-#### RegistrableApp 结构
-
-```typescript
-interface RegistrableApp<T extends ObjectType> {
-  name: string;                    // 微应用名称，全局唯一
-  entry: string | { scripts?: string[], styles?: string[] }; // 微应用入口
-  container: string | HTMLElement; // 微应用容器节点
-  activeRule: string | (location: Location) => boolean; // 激活规则
-  props?: T;                       // 传递给微应用的数据
-  loader?: (loading: boolean) => void; // 加载状态回调
-  configuration?: AppConfiguration; // 覆盖当前应用的加载配置
-}
-```
-
-| 属性 | 类型 | 必填 | 描述 |
-|------|------|------|------|
-| `name` | `string` | ✅ | 微应用名称，作为微应用的唯一标识 |
-| `entry` | `string \| EntryOpts` | ✅ | 微应用的入口，可以是 URL 或资源配置对象 |
-| `container` | `string \| HTMLElement` | ✅ | 微应用的容器节点选择器或 DOM 节点 |
-| `activeRule` | `string \| Function` | ✅ | 微应用的激活规则 |
-| `props` | `T` | ❌ | 传递给微应用的自定义数据 |
-| `loader` | `Function` | ❌ | 微应用加载状态改变时的回调函数 |
-| `configuration` | `AppConfiguration` | ❌ | 当前应用的加载配置，覆盖框架级默认值 |
-
-### lifeCycles
-
-- **类型**: `LifeCycles<T>`
-- **必填**: ❌
-- **描述**: 全局生命周期钩子
-
-```typescript
-interface LifeCycles<T extends ObjectType> {
-  beforeLoad?: LifeCycleFn<T> | Array<LifeCycleFn<T>>;
-  beforeMount?: LifeCycleFn<T> | Array<LifeCycleFn<T>>;
-  afterMount?: LifeCycleFn<T> | Array<LifeCycleFn<T>>;
-  beforeUnmount?: LifeCycleFn<T> | Array<LifeCycleFn<T>>;
-  afterUnmount?: LifeCycleFn<T> | Array<LifeCycleFn<T>>;
-}
-```
-
-## 💡 使用示例
-
-### 基础用法
-
-```typescript
+```ts
 import { registerMicroApps, start } from 'qiankun';
 
-registerMicroApps([
-  {
-    name: 'react16App',
-    entry: '//localhost:7100',
-    container: '#subapp-viewport',
-    activeRule: '/react16',
-  },
-  {
-    name: 'vue3App', 
-    entry: '//localhost:7101',
-    container: '#subapp-viewport',
-    activeRule: '/vue3',
-  }
-]);
-
+registerMicroApps(apps, lifeCycles);
 start();
 ```
 
-### 高级配置
+## Parameters
 
-```typescript
-registerMicroApps([
-  {
-    name: 'dashboard',
-    entry: {
-      scripts: [
-        '//localhost:7100/static/js/main.js'
-      ],
-      styles: [
-        '//localhost:7100/static/css/main.css'
-      ]
-    },
-    container: '#dashboard-container',
-    activeRule: (location) => location.pathname.startsWith('/dashboard'),
-    props: {
-      token: 'your-auth-token',
-      userId: 123,
-      theme: 'dark'
-    },
-    loader: (loading) => {
-      console.log('Dashboard app loading:', loading);
-      // 显示/隐藏 loading 状态
-    },
-    configuration: {
-      sandbox: {
-        styleIsolation: true, // 为该应用开启样式隔离
-      },
-    }
-  }
-], {
-  beforeLoad: [
-    app => console.log('Before load:', app.name),
-    app => trackEvent('micro-app-loading', { name: app.name })
-  ],
-  beforeMount: app => console.log('Before mount:', app.name),
-  afterMount: app => console.log('After mount:', app.name),
-  beforeUnmount: app => console.log('Before unmount:', app.name),
-  afterUnmount: app => console.log('After unmount:', app.name),
-});
-```
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `apps` | `Array<RegistrableApp<T>>` | Yes | The micro-apps to register. See [RegistrableApp fields](#registrableapp-fields). |
+| `lifeCycles` | `LifeCycles<T>` | No | Global lifecycle hooks applied to every app registered in this call. See [Global lifecycle hooks](#global-lifecycle-hooks). |
 
-## ⚙️ Entry 配置详解
+## RegistrableApp fields
 
-### URL 字符串
-
-最简单的配置方式，qiankun 会通过这个 URL 获取微应用的 HTML：
-
-```typescript
-{
-  name: 'app1',
-  entry: '//localhost:8080',
-  // ...
-}
-```
-
-### 资源对象
-
-精确控制微应用的资源加载：
-
-```typescript
-{
-  name: 'app2',
-  entry: {
-    scripts: [
-      '//localhost:8080/static/js/chunk.js',
-      '//localhost:8080/static/js/main.js'
-    ],
-    styles: [
-      '//localhost:8080/static/css/main.css'
-    ]
-  },
-  // ...
-}
-```
-
-## 🎯 ActiveRule 配置
-
-### 字符串路径
-
-```typescript
-{
-  activeRule: '/react16'  // 匹配 /react16/xxx 路径
-}
-```
-
-### 函数判断
-
-```typescript
-{
-  activeRule: (location) => {
-    // 自定义激活逻辑
-    return location.pathname.startsWith('/admin') && 
-           location.search.includes('module=dashboard');
-  }
-}
-```
-
-### 常见模式
-
-```typescript
-// 1. 精确匹配
-activeRule: (location) => location.pathname === '/exact-path'
-
-// 2. 多路径匹配
-activeRule: (location) => ['/path1', '/path2'].some(path => 
-  location.pathname.startsWith(path)
-)
-
-// 3. 带参数匹配
-activeRule: (location) => /^\/user\/\d+/.test(location.pathname)
-
-// 4. 查询参数匹配
-activeRule: (location) => new URLSearchParams(location.search).get('app') === 'module1'
-```
-
-## 🔧 Container 配置
-
-### CSS 选择器
-
-```typescript
-{
-  container: '#micro-app-container'
-}
-```
-
-### DOM 节点
-
-```typescript
-{
-  container: document.querySelector('#container')
-}
-```
-
-## 📨 Props 数据传递
-
-微应用可以通过 props 参数接收主应用传递的数据：
-
-```typescript
-// 主应用
-registerMicroApps([{
-  name: 'child-app',
-  // ...
-  props: {
-    data: { user: 'john' },
-    methods: {
-      onGlobalStateChange: (state) => console.log(state),
-      setGlobalState: (state) => updateGlobalState(state)
-    }
-  }
-}]);
-```
-
-```typescript
-// 微应用
-export async function mount(props) {
-  console.log(props.data);     // { user: 'john' }
-  console.log(props.methods);  // { onGlobalStateChange, setGlobalState }
-}
-```
-
-## ⚠️ 注意事项
-
-### 应用名称唯一性
-
-```typescript
-// ❌ 错误：重复的应用名称
-registerMicroApps([
-  { name: 'app1', entry: '//localhost:8080', /*...*/ },
-  { name: 'app1', entry: '//localhost:8081', /*...*/ }, // 重复！
-]);
-
-// ✅ 正确：唯一的应用名称
-registerMicroApps([
-  { name: 'app1', entry: '//localhost:8080', /*...*/ },
-  { name: 'app2', entry: '//localhost:8081', /*...*/ },
-]);
-```
-
-### 容器节点存在性
-
-```typescript
-// ❌ 错误：容器节点不存在
-registerMicroApps([{
-  container: '#non-existent-container', // DOM 中不存在
-  // ...
-}]);
-
-// ✅ 正确：确保容器节点存在
-registerMicroApps([{
-  container: '#app-container', // 确保 DOM 中存在
-  // ...
-}]);
-```
-
-### 重复注册
-
-```typescript
-// ❌ 错误：重复注册会导致应用重复加载
-registerMicroApps([...]);
-registerMicroApps([...]); // 重复注册
-
-// ✅ 正确：只注册一次
-registerMicroApps([...]);
-```
-
-## 🚀 最佳实践
-
-### 1. 应用配置管理
-
-```typescript
-// 推荐：将应用配置抽取为单独文件
-const microApps = [
-  {
-    name: 'order-management',
-    entry: getAppEntry('order'),
-    container: '#subapp-container',
-    activeRule: '/order',
-    props: getAppProps('order')
-  },
-  // ...
-];
-
-registerMicroApps(microApps, {
-  beforeLoad: [initLoadingUI],
-  afterMount: [removeLoadingUI],
-});
-```
-
-### 2. 环境配置
-
-```typescript
-const getAppEntry = (name: string) => {
-  const entries = {
-    development: {
-      order: '//localhost:8001',
-      user: '//localhost:8002'
-    },
-    production: {
-      order: '//order.example.com',
-      user: '//user.example.com'
-    }
-  };
-  
-  return entries[process.env.NODE_ENV][name];
+```ts
+type RegistrableApp<T extends ObjectType> = {
+  name: string;
+  entry: string;                       // HTMLEntry
+  container: HTMLElement;
+  activeRule: string | ActivityFn | Array<string | ActivityFn>;
+  props?: T;
+  loader?: (loading: boolean) => void;
+  configuration?: AppConfiguration;
 };
 ```
 
-### 3. 统一错误处理
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `name` | `string` | Yes | A stable, unique identifier for this route-registered app. Duplicate names are skipped, so keep it consistent across registrations. It does not normally need to match a package or Webpack library name. See [Choose a stable, unique `name`](#choose-a-stable-unique-name). |
+| `entry` | `string` | Yes | The URL of the micro-app's HTML entry, e.g. `//localhost:7100`. In v3 `entry` is always a string (an HTML address); the 2.x `{ scripts, styles }` object form is gone. |
+| `container` | `HTMLElement` | Yes | The DOM element the micro-app mounts into — a real element, not a selector string. Pass a node obtained from a ref, or `document.getElementById(...)`. |
+| `activeRule` | `string \| ActivityFn \| Array<string \| ActivityFn>` | Yes | When the app activates; forwarded as-is to single-spa's `activeWhen`. A string is a path prefix; a function `(location) => boolean` gives you full control; an array activates when any entry matches. |
+| `props` | `T` | No | Data passed to the micro-app on every lifecycle call (`bootstrap` / `mount` / `unmount` / `update`). |
+| `loader` | `(loading: boolean) => void` | No | Reports loading state. It receives `true` while source loading or mounting begins and `false` after mounting completes. Treat the value as state: consecutive `true` notifications are possible. |
+| `configuration` | `AppConfiguration` | No | Per-app runtime configuration: `sandbox`, `styleIsolation`, `fetch`, and so on. See [AppConfiguration](/api/configuration) and [Per-app configuration is the only configuration entry point](#per-app-configuration-is-the-only-configuration-entry-point). |
 
-```typescript
-registerMicroApps(microApps, {
-  beforeLoad: (app) => {
-    console.log(`Loading ${app.name}...`);
+::: info entry and container
+`entry` must be served with permissive CORS response headers, because qiankun fetches this HTML and its assets cross-origin. The `container` element must stay in the page for the entire registration lifetime — qiankun captures a reference to this element at registration time, so it must not be replaced by the host framework, re-created via a key, or unmounted.
+:::
+
+### About `activeRule`
+
+`activeRule` is single-spa's `activeWhen`. The most common form is a path prefix:
+
+```ts
+registerMicroApps([
+  { name: 'react', entry: '//localhost:7100', container, activeRule: '/react' },
+]);
+```
+
+When a prefix can't express what you need, reach for a function or an array:
+
+```ts
+registerMicroApps([
+  {
+    name: 'react',
+    entry: '//localhost:7100',
+    container,
+    // active on /react as well as any /shop/* route
+    activeRule: ['/react', (location) => location.pathname.startsWith('/shop/')],
   },
-  afterMount: (app) => {
-    console.log(`${app.name} mounted successfully`);
-  },
-  beforeUnmount: (app) => {
-    // 清理全局状态
-    cleanupGlobalState(app.name);
-  }
+]);
+```
+
+## Global lifecycle hooks
+
+The second argument applies to every app registered in this call. Each hook is a function (or array of functions) `(app, global) => Promise<void>`:
+
+```ts
+registerMicroApps(apps, {
+  beforeLoad:    (app) => { console.log('[lifecycle] before load', app.name); return Promise.resolve(); },
+  beforeMount:   (app) => { console.log('[lifecycle] before mount', app.name); return Promise.resolve(); },
+  afterMount:    (app) => { console.log('[lifecycle] after mount', app.name); return Promise.resolve(); },
+  beforeUnmount: (app) => { console.log('[lifecycle] before unmount', app.name); return Promise.resolve(); },
+  afterUnmount:  (app) => { console.log('[lifecycle] after unmount', app.name); return Promise.resolve(); },
 });
 ```
 
-## 🔗 相关 API
+The second argument, `global`, is the micro-app's sandbox-isolated `window` view (the Proxy membrane), not the real `window`. These framework-level hooks are a different thing from the `bootstrap` / `mount` / `unmount` a sub-app exports itself. For the full story see [Lifecycle hooks](/api/lifecycles) and [Micro-app lifecycle and props](/concepts/lifecycle-and-props).
 
-- [start](/api/start) - 启动 qiankun
-- [loadMicroApp](/api/load-micro-app) - 手动加载微应用
-- [生命周期](/api/lifecycles) - 详细的生命周期说明
+## Behavior
+
+- **Deduplicated by `name`.** If an app's `name` is already registered, it is skipped, so calling `registerMicroApps` twice with overlapping apps is safe.
+- **Registered with single-spa.** Each new app becomes a single-spa application, with `activeWhen` taken from `activeRule` and `customProps` from `props`.
+- **Activation waits for `start()`.** The internal loader waits until you call [start](/api/start) before loading and mounting. Registration alone has no visible effect.
+- **`loader` reports a state, not an event count.** It receives `true` when loading begins and again before a mount when needed, then `false` after mounting. Make the callback idempotent.
+- **`lifeCycles` applies to the whole call.** Hooks passed as the second argument run for every app registered by that call.
+
+```mermaid
+flowchart TD
+  A["registerMicroApps(apps, lifeCycles)"] --> B{"name already registered?"}
+  B -- Yes --> C["Skip"]
+  B -- No --> D["single-spa registerApplication"]
+  D --> E["Wait for start"]
+  F["start"] --> E
+  E --> G{"activeRule matches URL?"}
+  G -- Yes --> H["loading true → load and mount → loading false"]
+  G -- No --> I["Unmount when it no longer matches"]
+```
+
+## Example
+
+A complete main-app integration: get a real container element, give each app its own `configuration`, and call `start()` once at the end.
+
+::: code-group
+
+```ts [main/src/register.ts]
+import { registerMicroApps, start } from 'qiankun';
+
+export function registerAll(
+  container: HTMLElement,
+  onLoading: (name: string, loading: boolean) => void,
+): void {
+  registerMicroApps([
+    {
+      name: 'react',
+      entry: '//localhost:7100',
+      container,
+      activeRule: '/react',
+      loader: (loading) => onLoading('react', loading),
+      configuration: { sandbox: { styleIsolation: true } },
+    },
+    {
+      name: 'vue',
+      entry: '//localhost:7101',
+      container,
+      activeRule: '/vue',
+      loader: (loading) => onLoading('vue', loading),
+      configuration: { sandbox: { styleIsolation: true } },
+    },
+    {
+      // stable route-app id; it does not have to match output.library.name
+      name: 'webpack-app',
+      entry: '//localhost:7102',
+      container,
+      activeRule: '/webpack',
+      loader: (loading) => onLoading('webpack-app', loading),
+      configuration: { sandbox: true },
+    },
+  ]);
+
+  start();
+}
+```
+
+```tsx [main/src/App.tsx]
+import { useEffect, useRef } from 'react';
+import { registerAll } from './register';
+
+export default function App() {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (containerRef.current) {
+      registerAll(containerRef.current, (name, loading) => {
+        console.log(`[${name}] loading: ${loading}`);
+      });
+    }
+    // register once; the container must never be unmounted or keyed
+  }, []);
+
+  // Safe to share here because these activeRule values are mutually exclusive.
+  return <div ref={containerRef} id="subapp-stage" />;
+}
+```
+
+:::
+
+::: tip Share a container only for mutually exclusive routes
+Several route-driven apps may share a container only when their `activeRule` values cannot match at the same time. Overlapping rules can activate several apps concurrently; give those apps separate containers. Every registered container must remain in the DOM for the whole session.
+:::
+
+## Notes and pitfalls
+
+### Choose a stable, unique `name`
+
+`name` identifies a route-registered application to qiankun and single-spa. It is used for registration deduplication and runtime bookkeeping, so different apps must not share a name and the same app should keep its name across registrations.
+
+When the entry script is correctly marked, qiankun resolves lifecycle functions from that entry's execution result: the module exports for ESM, or the value produced by the classic entry script. This primary path does not require `name` to equal a package name or Webpack's `output.library.name`.
+
+Only when the entry result does not contain a valid lifecycle object does qiankun make a final compatibility attempt at `global[appName]` on the app's own global context. The global key must match `name` if an app deliberately relies on that fallback, but the fallback is not the normal naming contract. For the full lookup order, see [Micro-app lifecycle and props](/concepts/lifecycle-and-props).
+
+### Per-app configuration is the only configuration entry point
+
+There is no framework-level global config injected through `start()` in v3. `start()` only takes single-spa's `{ urlRerouteOnly? }`. What used to be global framework options — `sandbox`, `styleIsolation`, a custom `fetch` — are now all set **per app** in `RegistrableApp.configuration`:
+
+```ts
+registerMicroApps([
+  {
+    name: 'react',
+    entry: '//localhost:7100',
+    container,
+    activeRule: '/react',
+    configuration: {
+      sandbox: {              // default true; Proxy-membrane JS isolation
+        styleIsolation: true, // default false; CSS @scope isolation
+      },
+      // fetch: customFetch,  // optional custom fetch for this app's assets
+    },
+  },
+]);
+```
+
+For each field and its default, see [AppConfiguration](/api/configuration).
+
+::: warning No 2.x start options
+`prefetch`, `sandbox: { strictStyleIsolation | experimentalStyleIsolation }`, `singular`, `getPublicPath`, and `getTemplate` were all qiankun 2.x `start` options, and none of them exist in v3. Style isolation is `sandbox.styleIsolation`, a single boolean implemented under the hood with CSS `@scope` — there is no Shadow DOM mode. Prefetching is done automatically by the streaming loader, so there is no `prefetch` strategy to configure. See [Migrating from qiankun 2.x](/cookbook/migrate-from-2x).
+:::
+
+::: info No built-in global state library
+v3 no longer ships `initGlobalState` / `onGlobalStateChange` / `setGlobalState`. To share state, pass your own methods or store to each app through `props`. See [Sharing state and communicating between apps](/cookbook/communicate-between-apps).
+:::
+
+## See also
+
+- [start](/api/start) — activate registered apps
+- [loadMicroApp](/api/load-micro-app) — mount an app imperatively rather than by route
+- [AppConfiguration](/api/configuration) — per-app `sandbox`, `styleIsolation`, `fetch`
+- [Lifecycle hooks (LifeCycles)](/api/lifecycles) — global hook reference
+- [setDefaultMountApp / runAfterFirstMounted](/api/effects) — routing / first-mount side effects
+- [Type reference](/api/types) — `RegistrableApp`, `LoadableApp`, `HTMLEntry`

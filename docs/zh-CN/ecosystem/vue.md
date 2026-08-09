@@ -1,1078 +1,285 @@
-# Vue 绑定
+# Vue `<MicroApp>` 组件（@qiankunjs/vue）
 
-qiankun 的官方 Vue 绑定提供了一种声明式的方式来将微应用集成到您的 Vue 主应用中。`@qiankunjs/vue` 包提供了一个强大的 `<MicroApp />` 组件，支持 Vue 2/3 兼容性、Composition API 和基于插槽的自定义。
+`@qiankunjs/vue` 提供 `MicroApp` 组件，用于以声明式方式加载、挂载、更新和卸载 qiankun 微应用。该组件封装了 [`loadMicroApp`](/zh-CN/api/load-micro-app)，并根据 Vue 组件的生命周期管理微应用实例。
 
-## 📦 安装
+组件基于 [`vue-demi`](https://github.com/vueuse/vue-demi) 构建，同一份构建产物同时支持 Vue 2 和 Vue 3。
+
+## 安装
 
 ```bash
-npm install @qiankunjs/vue
+npm install @qiankunjs/vue@rc qiankun@rc
 ```
 
-**要求：**
-- Vue 2.0+ 或 Vue 3.0+ 
-- qiankun ≥ 3.0.0
-- 对于 Vue 2，您可能需要 `@vue/composition-api`
+主应用必须安装 `vue`，版本范围为 `^2.0.0 || >=3.0.0`。Vue 2 项目还需要安装 `@vue/composition-api`，因为组件通过 `vue-demi` 使用组合式 API。
 
-## 🚀 快速开始
+::: tip 使用前提
+`MicroApp` 组件直接调用 `loadMicroApp`，单独使用时无需调用 `registerMicroApps` 或 `start`。如果同一主应用还使用基于路由的注册方式，则仍需调用 [`start`](/zh-CN/api/start)。挂载和更新操作与 single-spa 生命周期的对应关系参见[微应用生命周期与 props](/zh-CN/concepts/lifecycle-and-props)。
+:::
 
-### Vue 3 与 Composition API
+## 基本用法
 
 ```vue
-<template>
-  <div class="main-app">
-    <h1>主应用</h1>
-    <MicroApp 
-      name="dashboard" 
-      entry="//localhost:8080" 
-    />
-  </div>
-</template>
-
 <script setup>
 import { MicroApp } from '@qiankunjs/vue';
 </script>
-```
 
-### Vue 2 与 Options API
-
-```vue
 <template>
-  <div class="main-app">
-    <h1>主应用</h1>
-    <micro-app 
-      name="dashboard" 
-      entry="//localhost:8080" 
-    />
-  </div>
+  <micro-app name="app1" entry="http://localhost:8000" />
 </template>
-
-<script>
-import { MicroApp } from '@qiankunjs/vue';
-
-export default {
-  components: {
-    MicroApp
-  }
-}
-</script>
 ```
 
-### 带加载状态
+`name` 和 `entry` 是仅有的两个必填 prop。`name` 用于标识当前实例，`entry` 用于指定微应用的 HTML 入口 URL。缺少其中任意一项时，组件仅输出错误日志，不会加载微应用，也不会抛出异常。
+
+组件会渲染一个 `class` 为 `qiankun-micro-app-container` 的 `<div>`，并将微应用内容流式写入该容器。只有启用加载状态或错误边界时，组件才会额外渲染一层包裹元素。详见[加载与错误界面](#loading-and-error-ui)。
+
+## Props
+
+| Prop | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `name` | `string` | — | **必填。** 微应用实例的名称；值发生变化时会重新挂载。 |
+| `entry` | `string` | — | **必填。** 微应用的 HTML 入口 URL。 |
+| `settings` | `AppConfiguration` | `{ sandbox: true }` | 传递给 `loadMicroApp` 的加载器和沙箱配置。参见 [AppConfiguration](/zh-CN/api/configuration)。 |
+| `lifeCycles` | `LifeCycles` | `undefined` | 由主应用提供的生命周期钩子，包括 `beforeLoad`、`beforeMount`、`afterMount`、`beforeUnmount` 和 `afterUnmount`。每项可传入函数或函数数组。参见[生命周期钩子](/zh-CN/api/lifecycles)。 |
+| `autoSetLoading` | `boolean` | `false` | 微应用加载期间渲染内置的加载指示器。 |
+| `autoCaptureError` | `boolean` | `false` | 加载失败时渲染内置的错误边界。 |
+| `wrapperClassName` | `string` | `undefined` | 包裹元素上的额外 CSS 类名。仅在启用加载状态或错误边界时生效。 |
+| `className` | `string` | `undefined` | 挂载容器元素上的额外 CSS 类名。 |
+| `appProps` | `object` | `undefined` | 传递给微应用的 props。Vue 绑定仅通过该属性向微应用传递数据。 |
+
+::: info `settings` 的默认值与 React 绑定不同
+Vue 绑定的 `settings` 默认值为 `{ sandbox: true }`，[React 绑定](/zh-CN/ecosystem/react)则不设置默认值，不会替你填任何默认项。两者的 `sandbox` 在 qiankun 核心运行时中默认值都为 `true`，因此不额外传值时行为一致。
+:::
+
+::: warning 业务数据通过 `appProps` 传递
+React 绑定会将 `<MicroApp>` 上的附加 prop 传递给微应用，Vue 绑定则不会传递任意附加属性。业务数据必须放入 `appProps` 对象，未声明的其他属性会被忽略。当前实现还会将 `autoSetLoading`、`autoCaptureError` 和 `appProps` 对象本身传入微应用；业务代码不应依赖这些组件控制字段。
+:::
+
+### `settings`（AppConfiguration）
+
+`settings` 与 [`loadMicroApp`](/zh-CN/api/load-micro-app) 的第二个参数结构相同。完整定义参见 [AppConfiguration](/zh-CN/api/configuration)，字段为 `fetch`、`streamTransformer`、`nodeTransformer` 和 `sandbox`（默认值为 `true`）。样式隔离、额外全局变量、孵化上下文和隔离插件均位于 `sandbox` 对象内部。
 
 ```vue
 <template>
-  <MicroApp 
-    name="dashboard" 
-    entry="//localhost:8080" 
-    auto-set-loading
+  <micro-app
+    name="app1"
+    entry="http://localhost:8000"
+    :settings="{ sandbox: { styleIsolation: true } }"
   />
 </template>
-
-<script setup>
-import { MicroApp } from '@qiankunjs/vue';
-</script>
 ```
 
-### 带错误处理
+如需为特定微应用关闭 JavaScript 沙箱，可传入 `:settings="{ sandbox: false }"`。相关行为参见 [JavaScript 隔离](/zh-CN/concepts/js-sandbox)和[样式隔离](/zh-CN/concepts/style-isolation)。
+
+## 向微应用传递 props（`appProps`）
+
+需要传递给微应用的数据应放入 `appProps`：
 
 ```vue
-<template>
-  <MicroApp 
-    name="dashboard" 
-    entry="//localhost:8080" 
-    auto-set-loading
-    auto-capture-error
-  />
-</template>
-
-<script setup>
-import { MicroApp } from '@qiankunjs/vue';
-</script>
-```
-
-### 沙箱与样式隔离
-
-微应用的 qiankun 配置走 `settings`，类型即核心 API 的 `AppConfiguration`：
-
-```vue
-<template>
-  <MicroApp name="dashboard" entry="//localhost:8080" :settings="settings" />
-</template>
-
-<script setup>
-import { MicroApp } from '@qiankunjs/vue';
-
-// settings 只在挂载该微应用时读取一次，用一个稳定的对象即可
-const settings = { sandbox: { styleIsolation: true } };
-</script>
-```
-
-`settings` 的默认值是 `{ sandbox: true }`，即默认开启 JS 沙箱、不做样式隔离；样式隔离需要像上面这样显式打开。
-
-## 🎯 组件 API
-
-### 属性
-
-| 属性 | 类型 | 必需 | 默认值 | 描述 |
-|------|------|------|--------|------|
-| `name` | `string` | ✅ | - | 微应用的唯一名称，也是组件判定「换了一个微应用」的依据 |
-| `entry` | `string` | ✅ | - | 微应用的入口 URL，只在挂载该 `name` 时读取一次 |
-| `settings` | `AppConfiguration` | ❌ | `{ sandbox: true }` | 该微应用的 qiankun 配置：沙箱、样式隔离、fetch 等 |
-| `lifeCycles` | `LifeCycles` | ❌ | `undefined` | 该微应用的 qiankun 生命周期钩子，见下方说明 |
-| `autoSetLoading` | `boolean` | ❌ | `false` | 不写 `loader` 插槽时，使用内置的加载状态组件 |
-| `autoCaptureError` | `boolean` | ❌ | `false` | 不写 `error-boundary` 插槽时，使用内置的错误捕获组件 |
-| `className` | `string` | ❌ | `undefined` | 微应用容器的 CSS 类 |
-| `wrapperClassName` | `string` | ❌ | `undefined` | 包装器的 CSS 类（仅在启用加载状态或错误捕获时才有包装器） |
-| `appProps` | `Record<string, unknown>` | ❌ | `undefined` | 传给微应用的 props，见下方说明 |
-
-**以上属性都由组件自身消费，不会转发给微应用**：微应用的 props 只走 `appProps` 这一个通道。写在组件上的其他属性也不会传给微应用——它们和普通的透传属性一样，落在根元素上成了 HTML 属性。
-
-**`lifeCycles` 不要闭包组件状态：** qiankun 会按 (name, container) 缓存一份 parcel 配置，生命周期钩子也在其中——同一个容器里首次加载时捕获到的那份钩子，才是后续一直生效的那份。所以钩子里不要引用会变化的组件状态（否则读到的永远是首次挂载时的值），需要跟随状态变化的 UI 请交给 `loader` / `error-boundary` 插槽表达。
-
-### 微应用 props
-
-`appProps` 的内容会被展开后传给微应用；`appProps` 这个包装对象本身不会传下去。它变化时，组件会调用微应用的 `update` 生命周期（微应用需要导出 `update`，否则这次变更无处可落）：
-
-```vue
-<template>
-  <div>
-    <MicroApp name="dashboard" entry="//localhost:8080" :app-props="appProps" />
-    <button @click="appProps.theme = 'dark'">切换主题</button>
-  </div>
-</template>
-
 <script setup>
 import { reactive } from 'vue';
 import { MicroApp } from '@qiankunjs/vue';
 
-// 就地修改而不是整体替换：深度监听只在内容真正变化时才触发一次 update
-const appProps = reactive({ theme: 'light' });
+const appProps = reactive({ userId: 42, theme: 'dark' });
 </script>
-```
 
-建议用 `reactive` 或 `computed` 保持 `appProps` 的引用稳定。模板里写内联字面量（`:app-props="{ theme }"`）会让每次重渲染都产出一个新对象，从而触发一次多余的 `update`。
-
-### 插槽
-
-| 插槽 | 描述 | 参数 |
-|------|------|------|
-| `loader` | 自定义加载状态组件 | `{ loading: boolean }` |
-| `error-boundary` | 自定义错误捕获组件 | `{ error: Error }` |
-
-插槽参数是一个对象，所以写法是 `#loader="{ loading }"` 和 `#error-boundary="{ error }"`。错误插槽的两种拼写 `#error-boundary` 与 `#errorBoundary` 都被接受。
-
-**插槽与开关是二选一的关系**：写了 `loader` 插槽就不必再传 `autoSetLoading`——微应用挂载完成后，插槽拿到的 `loading` 一样会变成 `false`；同理写了 `error-boundary` 插槽也不必再传 `autoCaptureError`。这两个开关的含义只是「没写插槽时，使用内置的默认样式」。
-
-### 渲染结构
-
-只传 `name` / `entry` 时，组件只渲染一个微应用容器。启用了加载状态或错误捕获（无论是插槽还是开关）时，会多出一层包装器：
-
-```vue
-<div :class="`${wrapperClassName} qiankun-micro-app-wrapper`">
-  <div :class="`${className} qiankun-micro-app-container`" />
-  <!-- #loader 插槽，或内置的 MicroAppLoader；始终渲染，加载结束由 loading 变为 false 表达 -->
-  <!-- #error-boundary 插槽，或内置的 ErrorBoundary；仅在捕获到错误时渲染 -->
-</div>
-```
-
-容器排在最前面是有意的：qiankun 按容器的 XPath 索引它的容器级缓存，而 XPath 会数上同标签的前置兄弟节点，所以容器的位置不能随插槽的出现与消失而漂移。也正因为插槽排在容器之后，它们天然盖在微应用上方，不需要 `z-index`。
-
-Vue 绑定的包装器自身没有定位，如果你的插槽是覆盖式的浮层，请通过 `wrapperClassName` 给它加上 `position: relative`。
-
-## 🎨 自定义
-
-### 使用插槽自定义加载
-
-```vue
 <template>
-  <MicroApp name="dashboard" entry="//localhost:8080">
-    <template #loader="{ loading }">
-      <div v-if="loading" class="custom-loader">
-        <div class="spinner"></div>
-        <p>加载微应用中...</p>
-      </div>
-    </template>
-  </MicroApp>
+  <micro-app name="app1" entry="http://localhost:8000" :appProps="appProps" />
 </template>
+```
 
+这些数据会作为 `props` 参数传给微应用导出的生命周期函数：
+
+```ts
+// 微应用内部
+export async function mount(props) {
+  console.log(props.userId); // 42
+}
+```
+
+组件会**深度侦听** `appProps`。修改嵌套值（例如 `appProps.theme = 'light'`）会尝试更新当前实例。执行更新前，微应用必须导出 `update` 生命周期、处于 `MOUNTED` 状态，并且尚未开始卸载。相关说明参见[应用间共享状态与通信](/zh-CN/cookbook/communicate-between-apps)。
+
+::: tip `update` 仅在挂载完成后执行
+组件会等待 `mountPromise` 完成，再按顺序处理更新，并且仅在 Parcel 状态为 `MOUNTED` 时调用 `update`。挂载期间发生的中间状态变化不保证逐次触发更新。
+:::
+
+## 加载与错误界面 {#loading-and-error-ui}
+
+加载指示器和错误边界均需显式启用。如果未启用这两项功能，也未提供对应插槽，组件只渲染挂载容器 `<div>`。如果设置了 `autoSetLoading`、`autoCaptureError`、`#loader` 插槽或 `#error-boundary` 插槽中的任意一项，组件会额外渲染 `class` 为 `qiankun-micro-app-wrapper` 的包裹元素，用于容纳加载节点、错误节点和挂载容器。
+
+```mermaid
+flowchart TD
+  A[name 变化 / 首次挂载] --> B[loading = true]
+  B --> C[mountMicroApp -> loadMicroApp]
+  C -->|mountPromise 完成| D{是否启用 autoSetLoading}
+  D -->|是| E[loading = false，隐藏加载界面]
+  D -->|否| F[不自动清除 loading]
+  C -->|load/bootstrap/mount 失败| G{是否配置错误界面}
+  G -->|是| H[记录异常并显示错误边界]
+  G -->|否| I[重新抛出异常]
+```
+
+### 自动加载与错误捕获
+
+通过以下两个布尔 prop 启用内置指示器：
+
+```vue
 <script setup>
 import { MicroApp } from '@qiankunjs/vue';
 </script>
 
-<style scoped>
-.custom-loader {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 50px;
-}
-
-.spinner {
-  width: 40px;
-  height: 40px;
-  border: 4px solid #f3f3f3;
-  border-top: 4px solid #3498db;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-</style>
-```
-
-### 自定义错误边界
-
-```vue
 <template>
-  <MicroApp name="dashboard" entry="//localhost:8080">
-    <template #error-boundary="{ error }">
-      <div class="error-container">
-        <h3>🚨 应用错误</h3>
-        <p>{{ error.message }}</p>
-        <button @click="handleRetry">重试</button>
-      </div>
-    </template>
-  </MicroApp>
-</template>
-
-<script setup>
-import { MicroApp } from '@qiankunjs/vue';
-
-const handleRetry = () => {
-  window.location.reload();
-};
-</script>
-
-<style scoped>
-.error-container {
-  padding: 20px;
-  background: #fee;
-  border: 1px solid #fcc;
-  border-radius: 4px;
-  text-align: center;
-}
-
-button {
-  margin-top: 10px;
-  padding: 8px 16px;
-  background: #e74c3c;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-}
-</style>
-```
-
-### 样式设置
-
-```vue
-<template>
-  <MicroApp 
-    name="dashboard" 
-    entry="//localhost:8080" 
-    class-name="micro-app-container"
-    wrapper-class-name="micro-app-wrapper"
-    auto-set-loading
+  <micro-app
+    name="app1"
+    entry="http://localhost:8000"
+    autoSetLoading
+    autoCaptureError
   />
 </template>
-
-<style scoped>
-:deep(.micro-app-wrapper) {
-  /* 包装器自身没有定位，覆盖式的加载/错误浮层需要它成为定位上下文 */
-  position: relative;
-  border: 1px solid #e8e8e8;
-  border-radius: 6px;
-  overflow: hidden;
-}
-
-:deep(.micro-app-container) {
-  min-height: 400px;
-  background: #fafafa;
-}
-</style>
 ```
 
-## 🔧 高级用法
+内置界面仅提供基础占位内容：默认加载界面渲染文本 `loading...`，默认错误边界渲染包含 `error.message` 的 `<div>`。生产环境通常应使用下文介绍的插槽提供自定义界面。
 
-### 带标签页的多个微应用
+::: info 加载状态的初始值
+Vue 绑定将 `loading` 初始化为 `false`，React 绑定的初始值则为 `true`。微应用开始加载时，该状态会设为 `true`；启用 `autoSetLoading` 后，组件会在 `mountPromise` 完成时将其恢复为 `false`。未启用 `autoSetLoading` 时，组件不会渲染内置加载界面。
+:::
+
+### 自定义 `loader` 插槽
+
+可通过 `#loader` 作用域插槽渲染自定义加载指示器。组件会将布尔值 `loading` 直接传给插槽：加载期间为 `true`，加载结束后为 `false`。
 
 ```vue
-<template>
-  <div class="multi-app-container">
-    <div class="tabs">
-      <button 
-        v-for="tab in tabs" 
-        :key="tab.key"
-        :class="{ active: activeTab === tab.key }"
-        @click="activeTab = tab.key"
-      >
-        {{ tab.label }}
-      </button>
-    </div>
-    
-    <div class="tab-content">
-      <MicroApp 
-        v-if="activeTab === 'dashboard'"
-        name="dashboard" 
-        entry="//localhost:8080" 
-        auto-set-loading
-      />
-      <MicroApp 
-        v-else-if="activeTab === 'analytics'"
-        name="analytics" 
-        entry="//localhost:8081" 
-        auto-set-loading
-      />
-      <MicroApp 
-        v-else-if="activeTab === 'settings'"
-        name="settings" 
-        entry="//localhost:8082" 
-        auto-set-loading
-      />
-    </div>
-  </div>
-</template>
-
 <script setup>
-import { ref } from 'vue';
+import CustomLoader from '@/components/CustomLoader.vue';
 import { MicroApp } from '@qiankunjs/vue';
-
-const activeTab = ref('dashboard');
-
-const tabs = [
-  { key: 'dashboard', label: '仪表盘' },
-  { key: 'analytics', label: '分析' },
-  { key: 'settings', label: '设置' }
-];
 </script>
 
-<style scoped>
-.tabs {
-  display: flex;
-  border-bottom: 1px solid #ccc;
-}
-
-.tabs button {
-  padding: 10px 20px;
-  border: none;
-  background: none;
-  cursor: pointer;
-}
-
-.tabs button.active {
-  background: #007bff;
-  color: white;
-}
-
-.tab-content {
-  padding: 20px 0;
-}
-</style>
+<template>
+  <micro-app name="app1" entry="http://localhost:8000" autoSetLoading>
+    <template #loader="loading">
+      <custom-loader :loading="loading" />
+    </template>
+  </micro-app>
+</template>
 ```
 
-### 条件加载
+`#loader` 插槽的优先级高于内置加载界面。提供该插槽后，组件不会渲染默认加载界面；仍需设置 `autoSetLoading`，组件才会在 `mountPromise` 完成后自动将 `loading` 设为 `false`。
+
+### 自定义错误边界插槽
+
+可通过 `#error-boundary` 作用域插槽渲染自定义错误界面。组件会将 `Error` 实例直接传给插槽。该插槽仅在发生错误后渲染。
 
 ```vue
-<template>
-  <div>
-    <div v-if="!user">
-      <p>请登录以继续</p>
-      <button @click="login">登录</button>
-    </div>
-    
-    <div v-else>
-      <button @click="toggleMicroApp">
-        {{ showMicroApp ? '隐藏' : '显示' }} 微应用
-      </button>
-      
-      <MicroApp 
-        v-if="showMicroApp"
-        name="protected-app" 
-        entry="//localhost:8080" 
-        :app-props="appProps"
-        auto-set-loading
-        auto-capture-error
-      />
-    </div>
-  </div>
-</template>
-
 <script setup>
-import { ref, computed } from 'vue';
+import CustomErrorBoundary from '@/components/CustomErrorBoundary.vue';
+import { MicroApp } from '@qiankunjs/vue';
+</script>
+
+<template>
+  <micro-app name="app1" entry="http://localhost:8000">
+    <template #error-boundary="error">
+      <custom-error-boundary :error="error" />
+    </template>
+  </micro-app>
+</template>
+```
+
+### 未捕获的错误会重新抛出
+
+如果既未启用 `autoCaptureError`，也未提供 `#error-boundary` 插槽，则 `load`、`bootstrap` 和 `mount` 阶段的错误会从异步加载流程中重新抛出。建议启用组件内置错误界面或提供自定义错误界面，避免产生未处理的 Promise 拒绝。
+
+::: warning
+启用 `autoCaptureError` 或提供 `#error-boundary` 插槽后，组件会通过错误界面呈现异常，不再重新抛出。同一微应用应选择一种错误处理方式。详见[处理微应用错误](/zh-CN/cookbook/handle-errors)。
+:::
+
+## 重新挂载与实例句柄
+
+组件仅侦听 `name` 的变化来触发重新挂载。修改该 prop 会卸载当前微应用并创建新实例；仅修改 `entry`、`settings` 或 `lifeCycles` 不会创建新实例。组件销毁时，`onBeforeUnmount` 会自动卸载微应用；卸载操作会等待正在进行的 `mountPromise` 完成，以保持挂载和卸载的执行顺序。
+
+可以通过组件实例的 `microApp` 和 `microAppRef` 两个属性访问当前微应用实例，两者均指向同一个 [`MicroApp`](/zh-CN/api/types) Parcel 句柄。可通过模板 ref 访问该句柄：
+
+```vue
+<script setup>
+import { ref, onMounted } from 'vue';
 import { MicroApp } from '@qiankunjs/vue';
 
-const user = ref(null);
-const showMicroApp = ref(false);
-
-// 用 computed 而不是模板里的内联字面量，避免每次重渲染都触发一次 update
-const appProps = computed(() => ({
-  userId: user.value?.id,
-  permissions: user.value?.permissions
-}));
-
-const login = () => {
-  user.value = {
-    id: '123',
-    name: 'John Doe',
-    permissions: ['read', 'write']
-  };
-};
-
-const toggleMicroApp = () => {
-  showMicroApp.value = !showMicroApp.value;
-};
-</script>
-```
-
-### 切换微应用与 entry 的更新时机
-
-组件以 `name` 作为微应用的身份：`name` 变化时，组件会先卸载上一个微应用、再挂载新的；其他属性变化不会重新挂载。
-
-因此**只改 `entry`、`name` 保持不变是无效的**——`entry` 只在挂载时读取一次，也不会随后续的 props 更新下发。要换 entry，让 `name` 跟着一起变（路由驱动时天然如此）：
-
-```vue
-<template>
-  <div>
-    <select v-model="environment">
-      <option value="development">开发环境</option>
-      <option value="staging">测试环境</option>
-      <option value="production">生产环境</option>
-    </select>
-
-    <!-- name 跟着环境一起变，组件才会卸载旧的微应用、用新的 entry 挂载 -->
-    <MicroApp :name="`dynamic-app-${environment}`" :entry="entryUrls[environment]" auto-set-loading />
-  </div>
-</template>
-
-<script setup>
-import { ref } from 'vue';
-import { MicroApp } from '@qiankunjs/vue';
-
-const environment = ref('development');
-
-const entryUrls = {
-  development: '//localhost:8080',
-  staging: '//staging.example.com',
-  production: '//app.example.com'
-};
-</script>
-```
-
-如果微应用的 `name` 必须保持不变（例如它被别处依赖），就用 `:key` 让整个组件重建：
-
-```vue
-<template>
-  <MicroApp :key="entryUrls[environment]" name="dynamic-app" :entry="entryUrls[environment]" auto-set-loading />
-</template>
-```
-
-## 🎮 状态管理
-
-### 使用 Pinia 进行状态共享
-
-```vue
-<!-- 主应用 -->
-<template>
-  <div class="main-app">
-    <Navigation />
-    <MicroAppContainer />
-  </div>
-</template>
-
-<script setup>
-import Navigation from '@/components/Navigation.vue';
-import MicroAppContainer from '@/components/MicroAppContainer.vue';
-</script>
-```
-
-```typescript
-// stores/app.ts
-import { defineStore } from 'pinia';
-
-export const useAppStore = defineStore('app', {
-  state: () => ({
-    user: null,
-    theme: 'dark',
-    language: 'zh-CN'
-  }),
-  
-  actions: {
-    setUser(user) {
-      this.user = user;
-    },
-    
-    setTheme(theme) {
-      this.theme = theme;
-    }
-  }
-});
-```
-
-```vue
-<!-- 微应用容器 -->
-<template>
-  <MicroApp 
-    name="micro-app" 
-    entry="//localhost:8080" 
-    :app-props="appProps"
-    auto-set-loading
-  />
-</template>
-
-<script setup>
-import { computed } from 'vue';
-import { MicroApp } from '@qiankunjs/vue';
-import { useAppStore } from '@/stores/app';
-
-const store = useAppStore();
-
-const appProps = computed(() => ({
-  user: store.user,
-  theme: store.theme,
-  language: store.language
-}));
-</script>
-```
-
-### 应用间通信
-
-```vue
-<template>
-  <div class="app-communication">
-    <div class="app-container">
-      <h3>应用 1</h3>
-      <MicroApp 
-        ref="microApp1"
-        name="app1" 
-        entry="//localhost:8080" 
-        auto-set-loading
-      />
-    </div>
-    
-    <div class="app-container">
-      <h3>应用 2</h3>
-      <MicroApp 
-        ref="microApp2"
-        name="app2" 
-        entry="//localhost:8081" 
-        auto-set-loading
-      />
-    </div>
-  </div>
-</template>
-
-<script setup>
-import { ref, onMounted, onUnmounted } from 'vue';
-import { MicroApp } from '@qiankunjs/vue';
-
-const microApp1 = ref();
-const microApp2 = ref();
-
-const setupCommunication = () => {
-  // 设置全局通信渠道
-  window.appCommunication = {
-    sendMessage: (from, to, message) => {
-      const event = new CustomEvent('microAppMessage', {
-        detail: { from, to, message }
-      });
-      window.dispatchEvent(event);
-    }
-  };
-
-  // 监听消息
-  const handleMessage = (event) => {
-    console.log('收到消息:', event.detail);
-  };
-
-  window.addEventListener('microAppMessage', handleMessage);
-
-  return () => {
-    window.removeEventListener('microAppMessage', handleMessage);
-    delete window.appCommunication;
-  };
-};
+const microAppComp = ref();
 
 onMounted(() => {
-  const cleanup = setupCommunication();
-  
-  onUnmounted(() => {
-    cleanup();
-  });
+  // Parcel 句柄：getStatus()、mountPromise、unmount()、update() 等
+  console.log(microAppComp.value?.microApp?.getStatus());
 });
 </script>
 
-<style scoped>
-.app-communication {
-  display: flex;
-  gap: 20px;
-}
-
-.app-container {
-  flex: 1;
-  border: 1px solid #ccc;
-  padding: 20px;
-}
-</style>
+<template>
+  <micro-app ref="microAppComp" name="app1" entry="http://localhost:8000" />
+</template>
 ```
 
-## 🔒 TypeScript 支持
+该句柄是 `@qiankunjs/single-spa`（qiankun 内置的 single-spa fork）的 Parcel。`getStatus()` 返回 `NOT_LOADED`、`LOADING_SOURCE_CODE`、`NOT_BOOTSTRAPPED`、`BOOTSTRAPPING`、`NOT_MOUNTED`、`MOUNTING`、`MOUNTED`、`UPDATING`、`UNMOUNTING`、`UNLOADING`、`SKIP_BECAUSE_BROKEN` 或 `LOAD_ERROR`。完整类型参见[类型参考](/zh-CN/api/types)。
 
-`settings` 与 `lifeCycles` 的类型来自 qiankun 本身：`import type { AppConfiguration, LifeCycles } from 'qiankun'`。
+::: tip 由组件管理生命周期
+应优先通过 prop（`name`、`appProps`）管理微应用，而不是直接调用句柄上的 `unmount()` 或 `update()`。组件会按顺序执行卸载，并协调并发更新；直接调用句柄方法可能与组件的内部状态发生冲突。
+:::
 
-组件的模板 ref 上暴露了 `microApp`，也就是 `loadMicroApp` 返回的那个微应用实例（类型为 qiankun 的 `MicroApp`）。它是异步填上的：微应用挂载动作在组件 mounted 之后才发起，所以在宿主的 `onMounted` 里读它还是 `undefined`。
+## CSS 钩子
 
-### 自定义 Composable
+CSS 类名与 React 绑定一致。组件会添加两个稳定的类名，并在提供 `wrapperClassName` 或 `className` 时将自定义值添加到对应类名之前。
 
-```typescript
-// composables/useMicroApp.ts
-import { ref, onMounted, onUnmounted } from 'vue';
-import type { MicroApp } from 'qiankun';
+| 元素 | 始终应用的类名 | prop 提供的额外类名 |
+| --- | --- | --- |
+| 包裹元素（仅在启用加载状态或错误边界时存在） | `qiankun-micro-app-wrapper` | `wrapperClassName` |
+| 挂载容器 | `qiankun-micro-app-container` | `className` |
 
-interface UseMicroAppOptions {
-  onStatusChange?: (status: string) => void;
-  onError?: (error: Error) => void;
+```css
+/* 所有微应用的挂载容器 */
+.qiankun-micro-app-container {
+  min-height: 320px;
 }
 
-export function useMicroApp(options: UseMicroAppOptions = {}) {
-  // 组件实例上暴露的 microApp 就是微应用实例
-  const microAppRef = ref<{ microApp?: MicroApp } | null>(null);
-  const status = ref<string>('NOT_LOADED');
-  const error = ref<Error | null>(null);
-
-  const checkStatus = () => {
-    if (microAppRef.value?.microApp) {
-      const currentStatus = microAppRef.value.microApp.getStatus();
-      if (currentStatus !== status.value) {
-        status.value = currentStatus;
-        options.onStatusChange?.(currentStatus);
-      }
-    }
-  };
-
-  const handleError = (err: Error) => {
-    error.value = err;
-    options.onError?.(err);
-  };
-
-  let interval: number;
-
-  onMounted(() => {
-    interval = window.setInterval(checkStatus, 1000);
-  });
-
-  onUnmounted(() => {
-    if (interval) {
-      clearInterval(interval);
-    }
-  });
-
-  return {
-    microAppRef,
-    status,
-    error,
-    handleError
-  };
+/* 承载加载界面和错误界面的包裹元素 */
+.qiankun-micro-app-wrapper {
+  position: relative;
 }
 ```
+
+包裹元素仅在启用加载状态或错误边界时存在。因此，如果 `<micro-app>` 未配置加载或错误界面，`wrapperClassName` 不会产生效果。
+
+## 完整示例
 
 ```vue
-<template>
-  <div>
-    <p>状态: {{ status }}</p>
-    <p v-if="error">错误: {{ error.message }}</p>
-    
-    <MicroApp 
-      ref="microAppRef"
-      name="dashboard" 
-      entry="//localhost:8080" 
-      auto-set-loading
-    />
-  </div>
-</template>
-
-<script setup lang="ts">
-import { MicroApp } from '@qiankunjs/vue';
-import { useMicroApp } from '@/composables/useMicroApp';
-
-const { microAppRef, status, error } = useMicroApp({
-  onStatusChange: (status) => console.log('状态变化:', status),
-  onError: (error) => console.error('应用错误:', error)
-});
-</script>
-```
-
-## 🚀 性能优化
-
-### 使用 Suspense 进行懒加载
-
-```vue
-<template>
-  <Suspense>
-    <template #default>
-      <LazyMicroApp 
-        name="dashboard" 
-        entry="//localhost:8080" 
-        auto-set-loading
-      />
-    </template>
-    <template #fallback>
-      <div>加载组件中...</div>
-    </template>
-  </Suspense>
-</template>
-
 <script setup>
-import { defineAsyncComponent } from 'vue';
-
-const LazyMicroApp = defineAsyncComponent(() =>
-  import('@qiankunjs/vue').then(module => module.MicroApp)
-);
-</script>
-```
-
-### 使用 computed 进行记忆化
-
-```vue
-<template>
-  <MicroApp 
-    name="optimized-app" 
-    entry="//localhost:8080" 
-    :app-props="memoizedProps"
-    auto-set-loading
-  />
-</template>
-
-<script setup>
-import { computed } from 'vue';
+import { reactive } from 'vue';
 import { MicroApp } from '@qiankunjs/vue';
+import Spinner from '@/components/Spinner.vue';
+import ErrorPanel from '@/components/ErrorPanel.vue';
 
-const props = defineProps(['user', 'settings']);
-
-const memoizedProps = computed(() => ({
-  userId: props.user?.id,
-  theme: props.settings?.theme,
-  language: props.settings?.language
-}));
+const appProps = reactive({ userId: 42 });
 </script>
-```
 
-### 路由驱动：复用同一个 `<MicroApp>`
-
-多个微应用共用一个 `<MicroApp>`、由路由决定挂哪一个，是最省事也最划算的写法：`name` 变化时组件自己串行地完成「卸载旧的 → 挂载新的」，离开路由则卸载；组件实例不变意味着容器身份也不变，qiankun 按 (name, container) 建立的缓存因此得以复用。**不要加 `:key`**，加了就等于每次切换都重建组件与容器，白白丢掉这些。
-
-```vue
 <template>
-  <nav>
-    <RouterLink v-for="app in microApps" :key="app.name" :to="app.path">{{ app.label }}</RouterLink>
-  </nav>
-
-  <!-- 有意不加 :key：切换交给绑定组件自己串行地卸载、挂载 -->
-  <MicroApp
-    v-if="activeApp"
-    :name="activeApp.name"
-    :entry="activeApp.entry"
-    :settings="settings"
-    wrapper-class-name="stage"
+  <micro-app
+    name="app1"
+    entry="http://localhost:8000"
+    :settings="{ sandbox: { styleIsolation: true } }"
+    :appProps="appProps"
+    autoSetLoading
+    wrapperClassName="my-wrapper"
+    className="my-container"
   >
-    <template #loader="{ loading }">
-      <StageVeil :loading="loading" />
+    <template #loader="loading">
+      <spinner v-if="loading" />
     </template>
-    <template #error-boundary="{ error }">
-      <StageFailure :error="error" />
+    <template #error-boundary="error">
+      <error-panel :message="error.message" />
     </template>
-  </MicroApp>
+  </micro-app>
 </template>
-
-<script setup>
-import { computed } from 'vue';
-import { useRoute } from 'vue-router';
-import { MicroApp } from '@qiankunjs/vue';
-import StageVeil from '@/components/StageVeil.vue';
-import StageFailure from '@/components/StageFailure.vue';
-
-const settings = { sandbox: { styleIsolation: true } };
-
-const microApps = [
-  { name: 'react', label: 'React', path: '/react', entry: '//localhost:7100' },
-  { name: 'vue', label: 'Vue', path: '/vue', entry: '//localhost:7101' }
-];
-
-const route = useRoute();
-const activeApp = computed(() => microApps.find((app) => route.path.startsWith(app.path)));
-</script>
 ```
 
-仓库里的 [`examples/vue-host`](https://github.com/umijs/qiankun/tree/next/examples/vue-host) 就是这个写法的完整可运行版本（React 版本见 [`examples/main`](https://github.com/umijs/qiankun/tree/next/examples/main)）。
+## 相关内容
 
-需要注意 `<keep-alive>` 并不适合缓存微应用：失活只会让组件停用、并不会触发卸载，微应用会带着一个被移出文档的容器继续运行。基于路由的微应用请让组件真正卸载。
-
-## 🐛 错误处理与调试
-
-### 开发模式错误处理
-
-```vue
-<template>
-  <MicroApp 
-    name="dashboard" 
-    entry="//localhost:8080" 
-    auto-set-loading
-  >
-    <template #error-boundary="{ error }">
-      <ErrorDisplay :error="error" :is-development="isDevelopment" />
-    </template>
-  </MicroApp>
-</template>
-
-<script setup>
-import { MicroApp } from '@qiankunjs/vue';
-import ErrorDisplay from '@/components/ErrorDisplay.vue';
-
-const isDevelopment = process.env.NODE_ENV === 'development';
-</script>
-```
-
-```vue
-<!-- ErrorDisplay.vue -->
-<template>
-  <div class="error-container">
-    <div v-if="isDevelopment" class="dev-error">
-      <h3>🚨 开发环境错误</h3>
-      <pre>{{ error.stack }}</pre>
-      <button @click="reload">重新加载应用</button>
-    </div>
-    
-    <div v-else class="prod-error">
-      <h3>出现了一些问题</h3>
-      <p>请稍后再试。</p>
-      <button @click="reload">重试</button>
-    </div>
-  </div>
-</template>
-
-<script setup>
-defineProps(['error', 'isDevelopment']);
-
-const reload = () => {
-  window.location.reload();
-};
-</script>
-
-<style scoped>
-.error-container {
-  padding: 20px;
-  text-align: center;
-}
-
-.dev-error {
-  background: #ffe6e6;
-  border: 1px solid #ff9999;
-}
-
-.prod-error {
-  background: #f8f9fa;
-  border: 1px solid #dee2e6;
-}
-
-pre {
-  text-align: left;
-  background: #f5f5f5;
-  padding: 10px;
-  overflow: auto;
-}
-</style>
-```
-
-## 📚 Vue 2 兼容性
-
-### 在 Vue 2 中使用
-
-```vue
-<template>
-  <div class="main-app">
-    <h1>Vue 2 主应用</h1>
-    <micro-app 
-      name="dashboard" 
-      entry="//localhost:8080" 
-      :app-props="appProps"
-    >
-      <template v-slot:loader="{ loading }">
-        <div v-if="loading">加载中...</div>
-      </template>
-    </micro-app>
-  </div>
-</template>
-
-<script>
-import { MicroApp } from '@qiankunjs/vue';
-
-export default {
-  name: 'MainApp',
-  components: {
-    MicroApp
-  },
-  data() {
-    return {
-      user: {
-        id: '123',
-        name: 'John'
-      }
-    };
-  },
-  computed: {
-    appProps() {
-      return {
-        userId: this.user.id,
-        userName: this.user.name
-      };
-    }
-  }
-};
-</script>
-```
-
-### 在 Vue 2 中使用 Composition API
-
-```vue
-<template>
-  <micro-app 
-    name="dashboard" 
-    entry="//localhost:8080" 
-    :app-props="appProps"
-    auto-set-loading
-  />
-</template>
-
-<script>
-import { defineComponent, ref, computed } from '@vue/composition-api';
-import { MicroApp } from '@qiankunjs/vue';
-
-export default defineComponent({
-  components: {
-    MicroApp
-  },
-  setup() {
-    const user = ref({
-      id: '123',
-      name: 'John'
-    });
-
-    const appProps = computed(() => ({
-      userId: user.value.id,
-      userName: user.value.name
-    }));
-
-    return {
-      appProps
-    };
-  }
-});
-</script>
-```
-
-## 📚 最佳实践
-
-### 1. 使用描述性名称
-
-```vue
-<!-- ✅ 好：描述性名称 -->
-<MicroApp name="user-dashboard" entry="//localhost:8080" />
-<MicroApp name="order-management" entry="//localhost:8081" />
-
-<!-- ❌ 坏：通用名称 -->
-<MicroApp name="app1" entry="//localhost:8080" />
-<MicroApp name="app2" entry="//localhost:8081" />
-```
-
-### 2. 始终处理加载状态
-
-```vue
-<!-- ✅ 好：自定义加载状态（插槽自己就够，不需要再加 auto-set-loading） -->
-<MicroApp name="dashboard" entry="//localhost:8080">
-  <template #loader="{ loading }">
-    <CustomSpinner v-if="loading" />
-  </template>
-</MicroApp>
-
-<!-- ✅ 好：内置加载状态 -->
-<MicroApp name="dashboard" entry="//localhost:8080" auto-set-loading />
-
-<!-- ❌ 坏：没有加载指示 -->
-<MicroApp name="dashboard" entry="//localhost:8080" />
-```
-
-### 3. 实现错误边界
-
-```vue
-<!-- ✅ 好：优雅地处理错误（插槽自己就够，不需要再加 auto-capture-error） -->
-<MicroApp name="dashboard" entry="//localhost:8080">
-  <template #error-boundary="{ error }">
-    <ErrorFallback :error="error" />
-  </template>
-</MicroApp>
-```
-
-### 4. 使用响应式属性
-
-```vue
-<!-- ✅ 好：响应式属性 -->
-<MicroApp 
-  name="dashboard" 
-  entry="//localhost:8080" 
-  :app-props="reactiveProps"
-/>
-
-<script setup>
-import { computed } from 'vue';
-
-const reactiveProps = computed(() => ({
-  theme: store.theme,
-  user: store.user
-}));
-</script>
-```
-
-### 5. 环境特定的配置
-
-```vue
-<!-- ✅ 好：环境感知；entry 由构建期环境决定，运行时不会再变 -->
-<!-- 运行时切换 entry 请看「切换微应用与 entry 的更新时机」 -->
-<template>
-  <MicroApp 
-    name="dashboard" 
-    :entry="config.entry"
-    :app-props="config.props"
-  />
-</template>
-
-<script setup>
-import { computed } from 'vue';
-
-const config = computed(() => {
-  const env = import.meta.env.MODE;
-  
-  return {
-    development: { 
-      entry: '//localhost:8080', 
-      props: { debug: true } 
-    },
-    production: { 
-      entry: '//app.example.com', 
-      props: { debug: false } 
-    }
-  }[env];
-});
-</script>
-```
-
-## 🔗 相关文档
-
-- [React 绑定](/zh-CN/ecosystem/react) - React UI 绑定
-- [核心 API](/zh-CN/api/) - qiankun 核心 API
-- [配置](/zh-CN/api/configuration) - 配置选项
-- [生命周期](/zh-CN/api/lifecycles) - 生命周期钩子
-- [`examples/vue-host`](https://github.com/umijs/qiankun/tree/next/examples/vue-host) - 用本绑定承载四个微应用的 Vue 主应用示例
-- [`examples/main`](https://github.com/umijs/qiankun/tree/next/examples/main) - 同一批微应用的 React 主应用示例
+- [React `<MicroApp>` 组件](/zh-CN/ecosystem/react)——React 绑定及其 prop 传递方式。
+- [loadMicroApp](/zh-CN/api/load-micro-app)——组件所封装的核心 API。
+- [AppConfiguration](/zh-CN/api/configuration)——`settings` 的类型定义。
+- [微应用生命周期与 props](/zh-CN/concepts/lifecycle-and-props)——`mount`、`update` 和 `unmount` 的语义。
+- [运行多个微应用实例](/zh-CN/cookbook/run-multiple-instances)——同时挂载多个微应用。

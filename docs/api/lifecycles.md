@@ -1,16 +1,55 @@
-# Lifecycles
+# Lifecycle hooks (`LifeCycles`)
 
-Lifecycle hooks allow you to perform custom logic at different stages of a micro application's lifecycle. These hooks are executed automatically by qiankun during application loading, mounting, and unmounting processes.
+`LifeCycles` are host-provided hooks for observing one micro-app while it is prepared, mounted, and unmounted. They do not implement the micro-app itself; the app's own `bootstrap`, `mount`, `unmount`, and optional `update` exports are a separate contract.
 
-## 🎯 Type Definition
+## Use hooks with loadMicroApp
 
-```typescript
-export type LifeCycleFn<T extends ObjectType> = (
-  app: LoadableApp<T>, 
-  global: WindowProxy
+Pass hooks as the third argument to [`loadMicroApp`](/api/load-micro-app). They apply only to the returned instance:
+
+```ts
+import { loadMicroApp } from 'qiankun';
+
+const container = document.getElementById('micro-app-slot');
+if (!container) throw new Error('micro-app-slot not found');
+
+const microApp = loadMicroApp(
+  {
+    name: 'account-app',
+    entry: 'http://localhost:7101/',
+    container,
+  },
+  {},
+  {
+    beforeLoad: async (app) => console.log('preparing', app.name),
+    beforeMount: [
+      async (app) => console.log('mounting', app.name),
+      async (_app, global) => console.log('app URL', global.location.href),
+    ],
+    afterMount: async (app) => console.log('mounted', app.name),
+    beforeUnmount: async (app) => console.log('unmounting', app.name),
+    afterUnmount: async (app) => console.log('unmounted', app.name),
+  },
+);
+
+await microApp.mountPromise;
+
+// Later, when the host no longer needs this instance:
+await microApp.unmount();
+```
+
+The empty second argument is the per-app configuration position. See [`AppConfiguration`](/api/configuration) when you need to set it.
+
+## Types
+
+```ts
+type ObjectType = Record<string, unknown>;
+
+type LifeCycleFn<T extends ObjectType> = (
+  app: LoadableApp<T>,
+  global: WindowProxy,
 ) => Promise<void>;
 
-export type LifeCycles<T extends ObjectType> = {
+type LifeCycles<T extends ObjectType> = {
   beforeLoad?: LifeCycleFn<T> | Array<LifeCycleFn<T>>;
   beforeMount?: LifeCycleFn<T> | Array<LifeCycleFn<T>>;
   afterMount?: LifeCycleFn<T> | Array<LifeCycleFn<T>>;
@@ -19,537 +58,49 @@ export type LifeCycles<T extends ObjectType> = {
 };
 ```
 
-## 📋 Available Lifecycle Hooks
+`app` is the [`LoadableApp`](/api/types) description passed by the host: `{ name, entry, container, props? }`.
 
-### beforeLoad
+Each field accepts one function or an array. Array entries run in declaration order; qiankun awaits each returned Promise before starting the next. If a hook rejects, the remaining hooks in that chain do not run and the lifecycle transition fails.
 
-**Timing**: Called before the micro application starts loading.
+## The five hooks
 
-**Purpose**: Perform setup tasks before the application code is fetched and parsed.
+| Hook | Timing guarantee | Typical host use |
+| --- | --- | --- |
+| `beforeLoad` | Runs during entry preparation, before qiankun continues with the resolved app lifecycles; it is not guaranteed to precede the network request | Start host-side loading state or record timing |
+| `beforeMount` | Runs immediately before the micro-app's own `mount` is called | Prepare host context needed for this mount |
+| `afterMount` | Runs after the micro-app's `mount` Promise resolves | Hide loading UI or record a successful mount |
+| `beforeUnmount` | Runs immediately before the micro-app's own `unmount` is called | Persist host-owned state or stop host subscriptions |
+| `afterUnmount` | Runs during teardown after the micro-app's `unmount` Promise resolves | Finish host cleanup or record the end of a session |
 
-```typescript
-beforeLoad: async (app, global) => {
-  console.log(`About to load ${app.name}`);
-  // Setup global configurations
-  global.__INITIAL_CONFIG__ = getInitialConfig();
-}
-```
+`beforeMount` / `afterMount` surround the app's `mount`; they do not surround entry loading or `bootstrap`. `beforeUnmount` / `afterUnmount` similarly surround the app's `unmount` phase.
 
-### beforeMount
+On remount, the mount and unmount hooks run for each transition. `beforeLoad` belongs to entry preparation and is not a per-mount hook.
 
-**Timing**: Called after the application is loaded but before it's mounted to the DOM.
+### `beforeLoad` and network timing
 
-**Purpose**: Perform final setup before the application becomes active.
+Entry preparation may begin before `beforeLoad` is awaited, so the hook can overlap with the entry request. Do not use it to inject authentication, rewrite URLs, or otherwise assume it runs before fetching starts. Configure request behavior through [`AppConfiguration.fetch`](/api/configuration) instead.
 
-```typescript
-beforeMount: async (app, global) => {
-  console.log(`About to mount ${app.name}`);
-  // Initialize services
-  await initializeServices();
-  // Set loading state
-  setLoadingState(false);
-}
-```
+qiankun waits for `beforeLoad` before it proceeds with the lifecycle object resolved from the entry. This makes the hook suitable for host-side observation, but not for changing how that entry is loaded.
 
-### afterMount
+## The `global` argument
 
-**Timing**: Called after the micro application has been successfully mounted.
+With the default sandbox enabled, `global` is the isolated `WindowProxy` view seen by that micro-app instance. It is not the lifecycle object exported by the app and it is not the host page's real `window`.
 
-**Purpose**: Perform post-mount operations like analytics, feature initialization.
+Use it only when a micro-app intentionally expects a value on its window view; prefer `props` for application data and callbacks. When the sandbox is disabled, these isolation guarantees do not apply. See [JavaScript isolation](/concepts/js-sandbox) for the public boundaries.
 
-```typescript
-afterMount: async (app, global) => {
-  console.log(`${app.name} mounted successfully`);
-  // Track analytics
-  analytics.track('micro_app_mounted', { appName: app.name });
-  // Initialize features that depend on DOM
-  initializeDOMDependentFeatures();
-}
-```
+## Route-driven applications
 
-### beforeUnmount
+For the route-driven alternative, pass one `LifeCycles` object as the second argument to [`registerMicroApps`](/api/register-micro-apps). It applies to every app in that registration call, so use the `app` argument when reporting or branching by application. The hook meanings and timing guarantees are otherwise the same.
 
-**Timing**: Called before the micro application starts unmounting.
+## Host hooks vs. micro-app lifecycles
 
-**Purpose**: Cleanup operations before the application is removed.
+Host `LifeCycles` receive `(app, global)` and observe transitions around an instance. The micro-app's own `bootstrap`, `mount`, `unmount`, and optional `update` receive props, render the app, and perform its cleanup. Host hooks do not replace those exports.
 
-```typescript
-beforeUnmount: async (app, global) => {
-  console.log(`About to unmount ${app.name}`);
-  // Save application state
-  saveApplicationState(app.name);
-  // Cleanup event listeners
-  cleanupEventListeners();
-}
-```
+See [Micro-app lifecycle and props](/concepts/lifecycle-and-props) for the application-side contract.
 
-### afterUnmount
+## Related
 
-**Timing**: Called after the micro application has been completely unmounted.
-
-**Purpose**: Final cleanup and resource deallocation.
-
-```typescript
-afterUnmount: async (app, global) => {
-  console.log(`${app.name} unmounted`);
-  // Clear caches
-  clearApplicationCache(app.name);
-  // Reset global state
-  resetGlobalState();
-}
-```
-
-## 🔄 Lifecycle Flow
-
-```mermaid
-graph TD
-    A[Start Loading] --> B[beforeLoad]
-    B --> C[Load Application Code]
-    C --> D[beforeMount]
-    D --> E[Mount Application]
-    E --> F[afterMount]
-    F --> G[Application Running]
-    G --> H[beforeUnmount]
-    H --> I[Unmount Application]
-    I --> J[afterUnmount]
-    J --> K[Application Cleaned Up]
-```
-
-## 💡 Usage Examples
-
-### Basic Usage with registerMicroApps
-
-```typescript
-import { registerMicroApps, start } from 'qiankun';
-
-registerMicroApps([
-  {
-    name: 'react-app',
-    entry: '//localhost:7100',
-    container: '#subapp-viewport',
-    activeRule: '/react',
-  }
-], {
-  beforeLoad: async (app) => {
-    console.log('Loading app:', app.name);
-  },
-  afterMount: async (app) => {
-    console.log('App mounted:', app.name);
-  },
-  beforeUnmount: async (app) => {
-    console.log('Unmounting app:', app.name);
-  }
-});
-
-start();
-```
-
-### With loadMicroApp
-
-```typescript
-import { loadMicroApp } from 'qiankun';
-
-const microApp = loadMicroApp({
-  name: 'dashboard',
-  entry: '//localhost:8080',
-  container: '#dashboard-container',
-}, undefined, {
-  beforeLoad: async (app, global) => {
-    // Setup dashboard-specific configurations
-    global.DASHBOARD_CONFIG = getDashboardConfig();
-  },
-  afterMount: async (app) => {
-    // Initialize dashboard widgets
-    initializeDashboardWidgets();
-  }
-});
-```
-
-### Multiple Hooks
-
-```typescript
-// You can provide multiple hooks as an array
-const lifecycles = {
-  beforeMount: [
-    async (app) => {
-      await setupDatabase();
-    },
-    async (app) => {
-      await setupAnalytics();
-    },
-    async (app) => {
-      await setupFeatureFlags();
-    }
-  ],
-  afterMount: [
-    async (app) => {
-      trackPageView(app.name);
-    },
-    async (app) => {
-      initializeUserTracking();
-    }
-  ]
-};
-```
-
-## 🔧 Advanced Patterns
-
-### 1. State Management Integration
-
-```typescript
-import { store } from './store';
-
-const lifecycles = {
-  beforeLoad: async (app) => {
-    // Set loading state
-    store.dispatch({ type: 'SET_APP_LOADING', payload: { appName: app.name, loading: true } });
-  },
-  
-  afterMount: async (app) => {
-    // Update mounted apps list
-    store.dispatch({ type: 'ADD_MOUNTED_APP', payload: app.name });
-    store.dispatch({ type: 'SET_APP_LOADING', payload: { appName: app.name, loading: false } });
-  },
-  
-  beforeUnmount: async (app) => {
-    // Save app state before unmounting
-    const appState = getAppState(app.name);
-    store.dispatch({ type: 'SAVE_APP_STATE', payload: { appName: app.name, state: appState } });
-  },
-  
-  afterUnmount: async (app) => {
-    // Remove from mounted apps list
-    store.dispatch({ type: 'REMOVE_MOUNTED_APP', payload: app.name });
-  }
-};
-```
-
-### 2. Error Handling
-
-```typescript
-const lifecycles = {
-  beforeLoad: async (app) => {
-    try {
-      await performPreLoadChecks(app);
-    } catch (error) {
-      console.error(`Pre-load checks failed for ${app.name}:`, error);
-      // Optionally prevent loading by throwing
-      throw new Error(`Failed to initialize ${app.name}`);
-    }
-  },
-  
-  afterMount: async (app) => {
-    try {
-      await performPostMountTasks(app);
-    } catch (error) {
-      console.error(`Post-mount tasks failed for ${app.name}:`, error);
-      // Log error but don't prevent the app from running
-      reportError(error, { context: 'afterMount', appName: app.name });
-    }
-  }
-};
-```
-
-### 3. Performance Monitoring
-
-```typescript
-const performanceTracker = new Map();
-
-const lifecycles = {
-  beforeLoad: async (app) => {
-    performanceTracker.set(app.name, {
-      loadStart: performance.now()
-    });
-  },
-  
-  beforeMount: async (app) => {
-    const timing = performanceTracker.get(app.name);
-    timing.loadEnd = performance.now();
-    timing.mountStart = performance.now();
-  },
-  
-  afterMount: async (app) => {
-    const timing = performanceTracker.get(app.name);
-    timing.mountEnd = performance.now();
-    
-    // Calculate and report metrics
-    const loadTime = timing.loadEnd - timing.loadStart;
-    const mountTime = timing.mountEnd - timing.mountStart;
-    
-    analytics.track('micro_app_performance', {
-      appName: app.name,
-      loadTime,
-      mountTime,
-      totalTime: loadTime + mountTime
-    });
-  }
-};
-```
-
-### 4. Resource Management
-
-```typescript
-const resourceMap = new Map();
-
-const lifecycles = {
-  beforeMount: async (app) => {
-    // Allocate resources
-    const resources = await allocateResources(app.name);
-    resourceMap.set(app.name, resources);
-  },
-  
-  beforeUnmount: async (app) => {
-    // Save critical data
-    const resources = resourceMap.get(app.name);
-    if (resources) {
-      await saveCriticalData(app.name, resources);
-    }
-  },
-  
-  afterUnmount: async (app) => {
-    // Release resources
-    const resources = resourceMap.get(app.name);
-    if (resources) {
-      await releaseResources(resources);
-      resourceMap.delete(app.name);
-    }
-  }
-};
-```
-
-## 🎯 Common Use Cases
-
-### 1. Loading States
-
-```typescript
-const loadingManager = {
-  show: (appName) => {
-    const loader = document.createElement('div');
-    loader.id = `loader-${appName}`;
-    loader.innerHTML = '<div class="spinner">Loading...</div>';
-    document.body.appendChild(loader);
-  },
-  
-  hide: (appName) => {
-    const loader = document.getElementById(`loader-${appName}`);
-    if (loader) loader.remove();
-  }
-};
-
-const lifecycles = {
-  beforeLoad: async (app) => {
-    loadingManager.show(app.name);
-  },
-  
-  afterMount: async (app) => {
-    loadingManager.hide(app.name);
-  }
-};
-```
-
-### 2. Authentication Check
-
-```typescript
-const lifecycles = {
-  beforeLoad: async (app) => {
-    const isAuthenticated = await checkAuthentication();
-    if (!isAuthenticated) {
-      throw new Error('User not authenticated');
-    }
-  },
-  
-  beforeMount: async (app, global) => {
-    // Inject user context
-    const userContext = await getUserContext();
-    global.__USER_CONTEXT__ = userContext;
-  }
-};
-```
-
-### 3. Theme Synchronization
-
-```typescript
-const lifecycles = {
-  beforeMount: async (app, global) => {
-    // Sync theme with micro app
-    const currentTheme = getCurrentTheme();
-    global.__THEME__ = currentTheme;
-    
-    // Apply theme-specific styles
-    applyThemeStyles(currentTheme);
-  },
-  
-  afterUnmount: async (app) => {
-    // Clean up theme styles
-    removeThemeStyles(app.name);
-  }
-};
-```
-
-### 4. Feature Flag Management
-
-```typescript
-const lifecycles = {
-  beforeLoad: async (app, global) => {
-    // Load feature flags for the specific app
-    const featureFlags = await getFeatureFlags(app.name);
-    global.__FEATURE_FLAGS__ = featureFlags;
-  },
-  
-  afterMount: async (app) => {
-    // Track which features are enabled
-    trackEnabledFeatures(app.name);
-  }
-};
-```
-
-## ⚠️ Important Notes
-
-### 1. Hook Execution Order
-
-```typescript
-// Hooks are executed in this order:
-// 1. beforeLoad (before app code is loaded)
-// 2. beforeMount (after load, before DOM mount)
-// 3. afterMount (after DOM mount)
-// ... app is running ...
-// 4. beforeUnmount (before DOM unmount)
-// 5. afterUnmount (after DOM unmount)
-```
-
-### 2. Error Handling
-
-```typescript
-// ❌ Bad: Unhandled errors can break the lifecycle
-beforeLoad: async (app) => {
-  riskyOperation(); // This could throw
-}
-
-// ✅ Good: Always handle potential errors
-beforeLoad: async (app) => {
-  try {
-    await riskyOperation();
-  } catch (error) {
-    console.error('Error in beforeLoad:', error);
-    // Decide whether to throw or handle gracefully
-  }
-}
-```
-
-### 3. Async Operations
-
-```typescript
-// ✅ Good: All lifecycle hooks are async
-beforeMount: async (app) => {
-  await setupDatabase();
-  await loadUserPreferences();
-}
-
-// ❌ Bad: Don't forget await for async operations
-beforeMount: async (app) => {
-  setupDatabase(); // Missing await!
-  loadUserPreferences(); // Missing await!
-}
-```
-
-### 4. Global Context
-
-```typescript
-// ✅ Good: Use the provided global context
-beforeMount: async (app, global) => {
-  global.MY_CONFIG = getConfig(); // Set on the isolated global
-}
-
-// ❌ Bad: Don't use window directly
-beforeMount: async (app, global) => {
-  window.MY_CONFIG = getConfig(); // Might affect other apps
-}
-```
-
-## 🚀 Best Practices
-
-### 1. Keep Hooks Lightweight
-
-```typescript
-// ✅ Good: Fast operations
-beforeMount: async (app) => {
-  setAppTheme(app.name);
-  updateNavigationState();
-}
-
-// ❌ Bad: Heavy operations
-beforeMount: async (app) => {
-  await downloadLargeDataset(); // This will block mounting
-  await processHeavyCalculations();
-}
-```
-
-### 2. Use Hook Arrays for Organization
-
-```typescript
-const lifecycles = {
-  beforeMount: [
-    setupAuthentication,
-    setupTheme,
-    setupAnalytics,
-    setupFeatureFlags
-  ],
-  afterMount: [
-    trackPageView,
-    initializeWidgets,
-    preloadCriticalData
-  ]
-};
-```
-
-### 3. Consistent Error Logging
-
-```typescript
-const createSafeHook = (hookName, hookFn) => async (app, global) => {
-  try {
-    await hookFn(app, global);
-  } catch (error) {
-    console.error(`Error in ${hookName} for ${app.name}:`, error);
-    // Report to error tracking service
-    errorTracker.report(error, { hook: hookName, app: app.name });
-  }
-};
-
-const lifecycles = {
-  beforeLoad: createSafeHook('beforeLoad', async (app) => {
-    // Your beforeLoad logic
-  }),
-  afterMount: createSafeHook('afterMount', async (app) => {
-    // Your afterMount logic
-  })
-};
-```
-
-### 4. Resource Cleanup
-
-```typescript
-// Track resources in a way that survives app reloads
-const globalResourceMap = window.__QIANKUN_RESOURCES__ || new Map();
-window.__QIANKUN_RESOURCES__ = globalResourceMap;
-
-const lifecycles = {
-  beforeMount: async (app) => {
-    const resources = await allocateResources();
-    globalResourceMap.set(app.name, resources);
-  },
-  
-  afterUnmount: async (app) => {
-    const resources = globalResourceMap.get(app.name);
-    if (resources) {
-      await cleanupResources(resources);
-      globalResourceMap.delete(app.name);
-    }
-  }
-};
-```
-
-## 🔗 Related APIs
-
-- [registerMicroApps](/api/register-micro-apps) - Using lifecycles with registered apps
-- [loadMicroApp](/api/load-micro-app) - Using lifecycles with manually loaded apps
-- [start](/api/start) - Framework startup configuration 
+- [`loadMicroApp`](/api/load-micro-app) — per-instance loading and handle ownership
+- [`registerMicroApps`](/api/register-micro-apps) — route-driven activation
+- [`AppConfiguration`](/api/configuration) — request and sandbox configuration
+- [Type reference](/api/types) — `LoadableApp`, `MicroApp`, and related types

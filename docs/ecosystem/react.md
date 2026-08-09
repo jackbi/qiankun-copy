@@ -1,813 +1,290 @@
-# React Bindings
+# The `<MicroApp>` component for React (@qiankunjs/react)
 
-The official React bindings for qiankun provide a declarative way to integrate micro applications into your React main application. The `@qiankunjs/react` package offers a powerful `<MicroApp />` component with built-in loading states, error handling, and TypeScript support.
+`@qiankunjs/react` gives you a `MicroApp` component that mounts a qiankun micro-app into your React component tree. It wraps [`loadMicroApp`](/api/load-micro-app) and ties the whole lifecycle — mount, update, unmount — to the component's own lifecycle and re-renders, so you never have to reach for that imperative API yourself.
 
-## 📦 Installation
+Use it when the host is a React SPA and you want to drop a micro-app in as an ordinary component (on a route, inside a panel) rather than registering it globally with [`registerMicroApps`](/api/register-micro-apps).
+
+## Installation
 
 ```bash
-npm install @qiankunjs/react
+npm install @qiankunjs/react@rc qiankun@rc
 ```
 
-**Requirements:**
-- React ≥ 16.9.0
-- qiankun ≥ 3.0.0
+The peer dependencies are `react` and `react-dom`, both required at `>=16.9.0`.
 
-## 🚀 Quick Start
+## Basic usage
 
-### Basic Usage
+The only required props are `name` and `entry`, where `entry` is the URL of the micro-app's HTML entry.
 
 ```tsx
-import React from 'react';
 import { MicroApp } from '@qiankunjs/react';
 
-function App() {
-  return (
-    <div className="main-app">
-      <h1>Main Application</h1>
-      <MicroApp 
-        name="dashboard" 
-        entry="//localhost:8080" 
-      />
-    </div>
-  );
-}
-
-export default App;
-```
-
-### With Loading State
-
-```tsx
-import React from 'react';
-import { MicroApp } from '@qiankunjs/react';
-
-function App() {
-  return (
-    <MicroApp 
-      name="dashboard" 
-      entry="//localhost:8080" 
-      autoSetLoading // Enable automatic loading state
-    />
-  );
+export default function Page() {
+  return <MicroApp name="app1" entry="http://localhost:8000" />;
 }
 ```
 
-### With Error Handling
+The component renders a container `<div>` and mounts the micro-app into it; when the component unmounts, the micro-app unmounts with it.
 
-```tsx
-import React from 'react';
-import { MicroApp } from '@qiankunjs/react';
+::: warning name and entry are required
+If either `name` or `entry` is missing, the component just logs `the name and entry of MicroApp is needed` and does nothing — it does not throw. Make sure you always pass both.
+:::
 
-function App() {
-  return (
-    <MicroApp 
-      name="dashboard" 
-      entry="//localhost:8080" 
-      autoSetLoading
-      autoCaptureError // Enable automatic error handling
-    />
-  );
-}
+## Props
+
+```ts
+import { type MicroApp } from 'qiankun';
+
+// The exported component type
+type Props = SharedProps & SharedSlots<React.ReactNode> & Record<string, unknown>;
 ```
 
-## 🎯 Component API
+That trailing `Record<string, unknown>` is deliberate: **any prop that isn't one of the reserved props listed below is forwarded to the micro-app as-is, becoming its props**. There's no separate `appProps` here — the extra props _are_ the micro-app's props.
 
-### Props
+### Reserved props
 
-| Prop | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `name` | `string` | ✅ | - | Unique name for the micro application |
-| `entry` | `string` | ✅ | - | Entry URL of the micro application |
-| `autoSetLoading` | `boolean` | ❌ | `false` | Render the built-in loading indicator |
-| `autoCaptureError` | `boolean` | ❌ | `false` | Render the built-in error panel |
-| `loader` | `(loading: boolean) => React.ReactNode` | ❌ | `undefined` | Custom loading slot. It works on its own — `autoSetLoading` is not needed alongside it, and a custom slot takes precedence over the built-in one |
-| `errorBoundary` | `(error: Error) => React.ReactNode` | ❌ | `undefined` | Custom error slot. Same rule: it works on its own and takes precedence over `autoCaptureError` |
-| `className` | `string` | ❌ | `undefined` | CSS class for the micro app container |
-| `wrapperClassName` | `string` | ❌ | `undefined` | CSS class for the wrapper, which only exists when a loading or error slot is active |
-| `settings` | `AppConfiguration` | ❌ | `undefined` | qiankun configuration for this micro app — sandbox, style isolation, fetch, … Nothing is defaulted on your behalf |
-| `lifeCycles` | `LifeCycles` | ❌ | `undefined` | qiankun lifecycle hooks for this micro app, see [Lifecycle Hooks](#lifecycle-hooks) |
+| Prop | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` * | `string` | — | The name of this micro-app instance. Changing it unmounts the current instance and creates a new one. |
+| `entry` * | `string` | — | The micro-app's HTML entry URL. |
+| `settings` | [`AppConfiguration`](/api/configuration) | — | Loader / sandbox configuration passed through to `loadMicroApp`. |
+| `lifeCycles` | [`LifeCycles`](/api/lifecycles) | — | Host-provided lifecycle hooks for this instance, such as `beforeLoad` and `beforeMount`. |
+| `autoSetLoading` | `boolean` | `false` | Render the built-in loader and clear it automatically once the app is mounted. |
+| `autoCaptureError` | `boolean` | `false` | Render the built-in error boundary instead of throwing loading errors outward. |
+| `wrapperClassName` | `string` | — | Class prepended to the wrapper element. Only takes effect when a loader or error boundary is active. |
+| `className` | `string` | — | Class prepended to the mount container element. |
+| `loader` | `(loading: boolean) => ReactNode` | — | Render-prop slot for a custom loading UI. |
+| `errorBoundary` | `(error: Error) => ReactNode` | — | Render-prop slot for a custom error UI. |
 
-Every prop above is fully typed, so a wrong value — `entry={8080}`, a `loader` with the wrong signature — is a compile error rather than a runtime surprise.
+`*` = required.
 
-If neither `errorBoundary` nor `autoCaptureError` is set, the component renders nothing for a failure: it re-throws the error, which surfaces as an unhandled rejection in the console. Pass one of the two props whenever a load or mount failure should be visible in the UI.
+Every other prop is deep-compared on each render and then forwarded to the micro-app. See [Passing props to the micro-app](#passing-props-to-the-micro-app).
 
-### Additional Props
+::: info Reserved fields are not forwarded
+Every prop the component owns — `name`, `entry`, `settings`, `lifeCycles`, `autoSetLoading`, `autoCaptureError`, `loader`, `errorBoundary`, `wrapperClassName`, and `className` — is consumed by the component and stripped off before the props reach the micro-app.
+:::
 
-Any prop the component does not own itself is forwarded to the micro application as a prop:
+## Passing props to the micro-app {#passing-props-to-the-micro-app}
+
+Any non-reserved prop is forwarded to the micro-app and delivered to its `bootstrap`/`mount`/`update` lifecycles.
 
 ```tsx
 <MicroApp
-  name="user-profile"
-  entry="//localhost:8080"
-  // These props are passed to the micro app
-  userId={user.id}
+  name="app1"
+  entry="http://localhost:8000"
+  // forwarded to the micro-app as props
+  userId={42}
   theme="dark"
-  permissions={user.permissions}
+  onEvent={(e) => console.log(e)}
 />
 ```
 
-The component-owned props — `name`, `entry`, `settings`, `lifeCycles`, `autoSetLoading`, `autoCaptureError`, `loader`, `errorBoundary`, `wrapperClassName` and `className` — are consumed by the component and never reach the micro app.
+Inside the micro-app, these values show up on the `props` of each lifecycle:
 
-Forwarded props are deep-compared between renders; when they actually change, the new values are pushed to the micro app's `update` lifecycle in order, after its mount has finished.
-
-### Sandbox and Style Isolation
-
-Per-app qiankun configuration travels through `settings`:
-
-```tsx
-<MicroApp name="dashboard" entry="//localhost:8080" settings={{ sandbox: { styleIsolation: true } }} />
+```ts
+export async function mount(props) {
+  console.log(props.userId, props.theme);
+}
 ```
 
-`settings` is the same `AppConfiguration` object `loadMicroApp` accepts, so every option in [Configuration](/api/configuration) is available here — sandbox mode, style isolation, `fetch`, and so on.
+When these props change, the component deep-compares them with lodash's `isEqual` and calls `microApp.update(props)` on the running app — the micro-app is not remounted. And the update only actually runs when the app's status is `MOUNTED`.
 
-## 🔄 Lifecycle Management
+::: tip Remount vs update
+Changing `name` unmounts the current instance and creates a new one. Changing another forwarded prop only attempts an in-place `update`. Changing `entry`, `settings`, or `lifeCycles` alone does not create a new instance. To reset completely, change `name` or give the component a new `key`.
+:::
 
-### Using Ref to Access Micro App Instance
+## Loading state
+
+The internal loading flag starts out `true` and is cleared once the app's `mountPromise` settles, whether it resolves or fails. That happens regardless of `autoSetLoading` — the flag only selects the built-in indicator, so gating the state on it would leave a custom `loader` spinning forever. Without a loading slot there is simply nothing to render for the state.
+
+### Built-in loader
 
 ```tsx
-import React, { useRef } from 'react';
-import { MicroApp, type MicroAppType } from '@qiankunjs/react';
+<MicroApp name="app1" entry="http://localhost:8000" autoSetLoading />
+```
 
-function App() {
+The built-in loader is just a placeholder that renders the literal text `loading...`. For a real UI, pass your own `loader`.
+
+### Custom loader
+
+```tsx
+<MicroApp
+  name="app1"
+  entry="http://localhost:8000"
+  loader={(loading) => <Spinner spinning={loading} />}
+/>
+```
+
+A custom `loader` works on its own and takes precedence over the built-in indicator, so `autoSetLoading` is redundant next to it. `wrapperClassName` only takes effect when a loading or error slot is active, because that is when the component renders the positioned wrapper element.
+
+## Error handling
+
+By default, errors from loading, bootstrap, and mount are re-thrown from the asynchronous loading flow. Configure the built-in or custom error UI to prevent an unhandled promise rejection.
+
+::: danger Handle asynchronous loading errors
+With neither `autoCaptureError` nor `errorBoundary` set, the component re-throws asynchronous loading errors. A React error boundary cannot catch an error thrown from a promise callback, so configure this component's own error UI.
+:::
+
+### Built-in error boundary
+
+```tsx
+<MicroApp name="app1" entry="http://localhost:8000" autoCaptureError />
+```
+
+The built-in boundary renders a bare `<div>` containing `error.message`. For production UI, pass your own `errorBoundary`.
+
+### Custom error boundary
+
+```tsx
+<MicroApp
+  name="app1"
+  entry="http://localhost:8000"
+  errorBoundary={(error) => <ErrorPanel message={error.message} />}
+/>
+```
+
+### Loading and error together
+
+```tsx
+<MicroApp
+  name="app1"
+  entry="http://localhost:8000"
+  autoSetLoading
+  autoCaptureError
+/>
+```
+
+For a more systematic treatment of error handling, see [Handling loading and runtime errors](/cookbook/handle-errors) and [addErrorHandler / removeErrorHandler](/api/error-handling).
+
+## Getting the running app through a ref
+
+The component is a `forwardRef`. The forwarded ref points at the running micro-app handle — a Parcel from `@qiankunjs/single-spa` (the `MicroApp` type in `qiankun`, re-exported by `@qiankunjs/react` as `MicroAppType`) — so you can read its status and await its lifecycle promises.
+
+```tsx
+import { useRef } from 'react';
+import { MicroApp } from '@qiankunjs/react';
+import { type MicroAppType } from '@qiankunjs/react';
+
+function Page() {
   const microAppRef = useRef<MicroAppType>(undefined);
 
-  const handleLogStatus = () => {
-    // Get micro app status
+  const logStatus = () => {
     console.log(microAppRef.current?.getStatus());
   };
 
   return (
-    <div>
-      <button onClick={handleLogStatus}>Log Micro App Status</button>
-      <MicroApp ref={microAppRef} name="dashboard" entry="//localhost:8080" />
-    </div>
+    <>
+      <button type="button" onClick={logStatus}>Check status</button>
+      <MicroApp
+        name="app1"
+        entry="http://localhost:8000"
+        autoSetLoading
+        ref={microAppRef}
+      />
+    </>
   );
 }
 ```
 
-`MicroAppType` is re-exported from `@qiankunjs/react`. React 19's types require `useRef` to be given an initial value, hence `useRef<MicroAppType>(undefined)`.
+### The ref handle
 
-The ref payload is refreshed on render, so it is still `undefined` while the parent's own mount effect runs. Read it from an event handler or from an effect that runs after the app is up, not from a `useEffect(…, [])`.
+The handle is single-spa's Parcel interface:
 
-The component owns the app's lifetime: it mounts on `name` and unmounts on cleanup, so unmount a micro app by no longer rendering its `<MicroApp />` rather than by calling `unmount()` on the instance.
+| Member | Type | Description |
+| --- | --- | --- |
+| `getStatus()` | `() => Status` | The current lifecycle status (see below). |
+| `mount()` | `() => Promise<null>` | Mount the app. |
+| `unmount()` | `() => Promise<null>` | Unmount the app. |
+| `update?(props)` | `(props) => Promise<unknown>` | Push new props (present only if the app exports an `update` lifecycle). |
+| `loadPromise` | `Promise<null>` | Resolves when the source code has finished loading. |
+| `bootstrapPromise` | `Promise<null>` | Resolves when the app has finished bootstrapping. |
+| `mountPromise` | `Promise<null>` | Resolves when the app has finished mounting. |
+| `unmountPromise` | `Promise<null>` | Resolves when the app has finished unmounting. |
 
-### Lifecycle Hooks
+`getStatus()` returns one of: `NOT_LOADED`, `LOADING_SOURCE_CODE`, `NOT_BOOTSTRAPPED`, `BOOTSTRAPPING`, `NOT_MOUNTED`, `MOUNTING`, `MOUNTED`, `UPDATING`, `UNMOUNTING`, `UNLOADING`, `SKIP_BECAUSE_BROKEN`, `LOAD_ERROR`.
 
-`lifeCycles` is handed to qiankun as-is and runs around the micro app's own lifecycles:
+::: warning Let the component manage the lifecycle
+The ref is for reading status and awaiting promises. Don't call its `mount()`/`unmount()` yourself — the component owns mount / update / unmount, and it also guards against concurrent unmount and remount. Calling those by hand tends to corrupt that state.
+:::
+
+## Passing configuration
+
+Loader- and sandbox-related options all go through `settings`, an [`AppConfiguration`](/api/configuration).
 
 ```tsx
 <MicroApp
-  name="dashboard"
-  entry="//localhost:8080"
+  name="app1"
+  entry="http://localhost:8000"
+  settings={{ sandbox: { styleIsolation: true } }}
+/>
+```
+
+`settings` is handed to `loadMicroApp` as-is — the component defaults nothing on your behalf. For what `sandbox.styleIsolation` actually enables, see [Style isolation](/concepts/style-isolation); for `sandbox` itself, see [The JS sandbox](/concepts/js-sandbox).
+
+## Lifecycle hooks
+
+Host lifecycle hooks are passed via `lifeCycles` and apply only to the instance created by this component. Each hook may be a single function or an array of functions.
+
+```tsx
+<MicroApp
+  name="app1"
+  entry="http://localhost:8000"
   lifeCycles={{
     beforeMount: async (app) => console.log('before mount', app.name),
-    afterMount: async (app) => console.log('after mount', app.name),
-    afterUnmount: async (app) => console.log('after unmount', app.name),
+    afterMount: async (app) => console.log('mounted', app.name),
   }}
 />
 ```
 
-qiankun caches one parcel configuration per (name, container) pair, lifecycle hooks included, so the hooks captured on the **first** load of an app into a given container are the ones that keep running there. Write them as stable, self-contained functions — a hook closing over component state would keep reading the values it saw on that first load. When a hook only exists to drive UI state, use the `loader` or `errorBoundary` slot instead: those are read on every render.
+For the full list of hooks and their signatures, see [Lifecycle hooks](/api/lifecycles).
 
-### App Status
+## Styling hooks
 
-The micro app instance provides these status values:
+The component always attaches two classes you can target in CSS:
 
-- `NOT_LOADED` - Initial state, not loaded yet
-- `LOADING_SOURCE_CODE` - Loading application resources
-- `NOT_BOOTSTRAPPED` - Resources loaded, not bootstrapped
-- `BOOTSTRAPPING` - Running bootstrap lifecycle
-- `NOT_MOUNTED` - Bootstrapped but not mounted
-- `MOUNTING` - Running mount lifecycle
-- `MOUNTED` - Successfully mounted and running
-- `UPDATING` - Running update lifecycle
-- `UNMOUNTING` - Running unmount lifecycle
-- `UNLOADING` - Cleaning up resources
-
-## 🎨 Customization
-
-### Custom Loading Component
-
-```tsx
-import React from 'react';
-import { MicroApp } from '@qiankunjs/react';
-import { Spin, Alert } from 'antd';
-
-const CustomLoader: React.FC<{ loading: boolean }> = ({ loading }) => {
-  if (!loading) return null;
-  
-  return (
-    <div style={{ textAlign: 'center', padding: '50px' }}>
-      <Spin size="large" />
-      <p style={{ marginTop: '16px' }}>Loading micro application...</p>
-    </div>
-  );
-};
-
-function App() {
-  return (
-    <MicroApp 
-      name="dashboard" 
-      entry="//localhost:8080" 
-      loader={(loading) => <CustomLoader loading={loading} />}
-    />
-  );
-}
-```
-
-A custom `loader` is all you need — it is called with `true` while the app is loading and with `false` once the app reaches `MOUNTED` (or fails). `autoSetLoading` only selects the built-in indicator, so it is redundant next to a `loader`.
-
-### Custom Error Boundary
-
-```tsx
-import React from 'react';
-import { MicroApp } from '@qiankunjs/react';
-import { Alert, Button } from 'antd';
-
-const CustomErrorBoundary: React.FC<{ error: Error }> = ({ error }) => {
-  const handleRetry = () => {
-    window.location.reload();
-  };
-
-  return (
-    <div style={{ padding: '20px' }}>
-      <Alert
-        message="Micro Application Error"
-        description={error.message}
-        type="error"
-        action={
-          <Button size="small" danger onClick={handleRetry}>
-            Retry
-          </Button>
-        }
-      />
-    </div>
-  );
-};
-
-function App() {
-  return (
-    <MicroApp 
-      name="dashboard" 
-      entry="//localhost:8080" 
-      errorBoundary={(error) => <CustomErrorBoundary error={error} />}
-    />
-  );
-}
-```
-
-### Styling
-
-When a loading or error slot is active, the component wraps the micro app container in one extra element, and the rendered result looks like this:
-
-```tsx
-<div style={{ position: 'relative' }} className={`${wrapperClassName} qiankun-micro-app-wrapper`}>
-  <div className={`${className} qiankun-micro-app-container`} />
-  {loader(loading)}
-  {error && errorBoundary(error)}
-</div>
-```
-
-The container is rendered first so its position never shifts as the loader and error slots come and go — qiankun keys its per-container caches on that position. Because the slots come after it, they paint above the micro app without needing a `z-index`, and the wrapper's inline `position: relative` gives an absolutely positioned overlay something to anchor to.
-
-Without a loading or error slot there is no wrapper: the component renders the container element on its own, and `wrapperClassName` has nothing to apply to.
-
-```tsx
-import React from 'react';
-import { MicroApp } from '@qiankunjs/react';
-import './MicroApp.css';
-
-function App() {
-  return (
-    <MicroApp 
-      name="dashboard" 
-      entry="//localhost:8080" 
-      className="micro-app-container"
-      wrapperClassName="micro-app-wrapper"
-      autoSetLoading
-    />
-  );
-}
-```
+| Element | Class |
+| --- | --- |
+| Wrapper (rendered only when a loader or error boundary is active) | `qiankun-micro-app-wrapper` |
+| Mount container (always rendered) | `qiankun-micro-app-container` |
 
 ```css
-/* MicroApp.css */
-.micro-app-wrapper {
-  border: 1px solid #e8e8e8;
-  border-radius: 6px;
-  overflow: hidden;
+.qiankun-micro-app-wrapper {
+  position: relative; /* already applied inline; add your own layout here */
 }
 
-.micro-app-container {
-  min-height: 400px;
-  background: #fafafa;
+.qiankun-micro-app-container {
+  min-height: 240px;
 }
 ```
 
-## 🔧 Advanced Usage
+`wrapperClassName` and `className` are **prepended** to these two classes, so both your own class and qiankun's hook class end up on the element.
 
-### Multiple Micro Apps
+## How it works under the hood
 
-```tsx
-import React, { useState } from 'react';
-import { MicroApp } from '@qiankunjs/react';
-import { Tabs } from 'antd';
-
-const { TabPane } = Tabs;
-
-function Dashboard() {
-  const [activeTab, setActiveTab] = useState('dashboard');
-
-  return (
-    <div className="multi-app-container">
-      <Tabs activeKey={activeTab} onChange={setActiveTab}>
-        <TabPane tab="Dashboard" key="dashboard">
-          <MicroApp 
-            name="dashboard" 
-            entry="//localhost:8080" 
-            autoSetLoading
-          />
-        </TabPane>
-        <TabPane tab="Analytics" key="analytics">
-          <MicroApp 
-            name="analytics" 
-            entry="//localhost:8081" 
-            autoSetLoading
-          />
-        </TabPane>
-        <TabPane tab="Settings" key="settings">
-          <MicroApp 
-            name="settings" 
-            entry="//localhost:8082" 
-            autoSetLoading
-          />
-        </TabPane>
-      </Tabs>
-    </div>
-  );
-}
+```mermaid
+flowchart TD
+  A[MicroApp renders] --> B{name / entry both present?}
+  B -- no --> B0[console.error, do nothing]
+  B -- yes --> C["loading = true, mountMicroApp()"]
+  C --> D["loadMicroApp(app, settings, lifeCycles)"]
+  D --> E{mountPromise}
+  E -- success --> F["loading = false"]
+  E -- failure --> G{autoCaptureError enabled or errorBoundary set?}
+  G -- yes --> H["setError(err)"]
+  G -- no --> I["re-throw asynchronous error"]
+  J[name changes] --> K[unmount old, mount new]
+  L[forwarded props change] --> M["deep compare, microApp.update(props)"]
+  N[component unmounts] --> O[unmount micro-app]
 ```
 
-### Conditional Loading
-
-```tsx
-import React, { useState } from 'react';
-import { MicroApp } from '@qiankunjs/react';
-
-function ConditionalApp() {
-  const [showMicroApp, setShowMicroApp] = useState(false);
-  const [user, setUser] = useState(null);
-
-  // Only load micro app when user is authenticated
-  if (!user) {
-    return <div>Please log in to continue</div>;
-  }
-
-  return (
-    <div>
-      <button onClick={() => setShowMicroApp(!showMicroApp)}>
-        {showMicroApp ? 'Hide' : 'Show'} Micro App
-      </button>
-      
-      {showMicroApp && (
-        <MicroApp 
-          name="protected-app" 
-          entry="//localhost:8080" 
-          userId={user.id}
-          permissions={user.permissions}
-          autoSetLoading
-          autoCaptureError
-        />
-      )}
-    </div>
-  );
-}
-```
-
-### Switching Apps at Runtime
-
-`name` is the mounted app's identity: changing it unmounts the current app and mounts the new one into the same container. Changing `entry` while `name` stays the same is a no-op — `entry` is only read when an app is mounted, and it is not among the props forwarded to a running app.
-
-So drive one `<MicroApp />` from your router, passing the `name` and `entry` the route selected:
-
-```tsx
-import { MicroApp } from '@qiankunjs/react';
-
-interface AppMeta {
-  name: string;
-  entry: string;
-}
-
-// The route decides which app lives in the stage; the component handles the switch,
-// and leaving the route unmounts the app. No `key` needed.
-function Stage({ app }: { app: AppMeta }) {
-  return (
-    <MicroApp
-      name={app.name}
-      entry={app.entry}
-      settings={{ sandbox: { styleIsolation: true } }}
-      autoSetLoading
-    />
-  );
-}
-```
-
-If you really need to point the same `name` at a different `entry` — switching environments at runtime, for instance — give the component a `key` so React re-creates it, or change the `name` along with the `entry`:
-
-```tsx
-const entryUrls = {
-  development: '//localhost:8080',
-  staging: '//staging.example.com',
-  production: '//app.example.com',
-};
-
-// `key` re-creates the component, which unmounts the old app and mounts the new entry
-<MicroApp
-  key={environment}
-  name="dynamic-app"
-  entry={entryUrls[environment]}
-  environment={environment}
-  autoSetLoading
-/>;
-```
-
-## 🎮 State Management
-
-### Using Context to Share State
-
-```tsx
-import React, { createContext, useContext, useState } from 'react';
-import { MicroApp } from '@qiankunjs/react';
-
-// Create a context for shared state
-const AppContext = createContext();
-
-function MainApp() {
-  const [sharedState, setSharedState] = useState({
-    user: { id: 1, name: 'John' },
-    theme: 'dark'
-  });
-
-  return (
-    <AppContext.Provider value={{ sharedState, setSharedState }}>
-      <div className="main-app">
-        <Navigation />
-        <MicroAppContainer />
-      </div>
-    </AppContext.Provider>
-  );
-}
-
-function MicroAppContainer() {
-  const { sharedState } = useContext(AppContext);
-  
-  return (
-    <MicroApp 
-      name="micro-app" 
-      entry="//localhost:8080" 
-      // Pass context data as props
-      user={sharedState.user}
-      theme={sharedState.theme}
-      autoSetLoading
-    />
-  );
-}
-```
-
-### Communication Between Apps
-
-```tsx
-import React, { useEffect, useRef } from 'react';
-import { MicroApp, type MicroAppType } from '@qiankunjs/react';
-
-function CommunicatingApps() {
-  const microApp1Ref = useRef<MicroAppType>(undefined);
-  const microApp2Ref = useRef<MicroAppType>(undefined);
-
-  useEffect(() => {
-    // Set up communication channel
-    window.appCommunication = {
-      sendMessage: (from, to, message) => {
-        const event = new CustomEvent('microAppMessage', {
-          detail: { from, to, message }
-        });
-        window.dispatchEvent(event);
-      }
-    };
-
-    // Listen for messages
-    const handleMessage = (event) => {
-      console.log('Message received:', event.detail);
-    };
-
-    window.addEventListener('microAppMessage', handleMessage);
-
-    return () => {
-      window.removeEventListener('microAppMessage', handleMessage);
-      delete window.appCommunication;
-    };
-  }, []);
-
-  return (
-    <div style={{ display: 'flex' }}>
-      <div style={{ flex: 1 }}>
-        <MicroApp 
-          ref={microApp1Ref}
-          name="app1" 
-          entry="//localhost:8080" 
-          autoSetLoading
-        />
-      </div>
-      <div style={{ flex: 1 }}>
-        <MicroApp 
-          ref={microApp2Ref}
-          name="app2" 
-          entry="//localhost:8081" 
-          autoSetLoading
-        />
-      </div>
-    </div>
-  );
-}
-```
-
-## 🔒 TypeScript Support
-
-### Typed Props
-
-The component's own props are fully typed, so TypeScript checks them at the call site:
-
-```tsx
-import React from 'react';
-import { MicroApp } from '@qiankunjs/react';
-
-const TypedApp: React.FC = () => (
-  <MicroApp
-    name="user-profile"
-    entry="//localhost:8080"
-    settings={{ sandbox: { styleIsolation: true } }}
-    // loading is inferred as boolean, error as Error
-    loader={(loading) => (loading ? <Spinner /> : null)}
-    errorBoundary={(error) => <ErrorPanel message={error.message} />}
-  />
-);
-
-// ❌ Compile errors
-<MicroApp name="user-profile" entry={8080} />; // entry must be a string
-<MicroApp name="user-profile" entry="//localhost:8080" autoSetLoading="yes" />; // autoSetLoading must be a boolean
-```
-
-Props forwarded to the micro app are intentionally untyped (`Record<string, unknown>`), because only the micro app knows their shape. Wrap the component if you want them checked where they are passed:
-
-```tsx
-import React from 'react';
-import { MicroApp } from '@qiankunjs/react';
-
-interface UserProfileProps {
-  userId: string;
-  theme: 'light' | 'dark';
-  permissions: string[];
-}
-
-// Type the additional props by owning the call site
-export const UserProfileApp: React.FC<UserProfileProps> = (props) => (
-  <MicroApp name="user-profile" entry="//localhost:8080" {...props} autoSetLoading />
-);
-```
-
-### Custom Hook for Micro App
-
-```tsx
-import { useRef, useEffect, useState } from 'react';
-import { type MicroAppType } from '@qiankunjs/react';
-
-interface UseMicroAppOptions {
-  onStatusChange?: (status: string) => void;
-  onError?: (error: Error) => void;
-}
-
-export function useMicroApp(options: UseMicroAppOptions = {}) {
-  const microAppRef = useRef<MicroAppType>(undefined);
-  const [status, setStatus] = useState<string>('NOT_LOADED');
-  const [error, setError] = useState<Error | null>(null);
-
-  useEffect(() => {
-    const checkStatus = () => {
-      if (microAppRef.current) {
-        const currentStatus = microAppRef.current.getStatus();
-        if (currentStatus !== status) {
-          setStatus(currentStatus);
-          options.onStatusChange?.(currentStatus);
-        }
-      }
-    };
-
-    const interval = setInterval(checkStatus, 1000);
-    return () => clearInterval(interval);
-  }, [status, options]);
-
-  const handleError = (err: Error) => {
-    setError(err);
-    options.onError?.(err);
-  };
-
-  return {
-    microAppRef,
-    status,
-    error,
-    handleError
-  };
-}
-
-// Usage
-function App() {
-  const { microAppRef, status, error } = useMicroApp({
-    onStatusChange: (status) => console.log('Status changed:', status),
-    onError: (error) => console.error('App error:', error)
-  });
-
-  return (
-    <div>
-      <p>Status: {status}</p>
-      {error && <p>Error: {error.message}</p>}
-      <MicroApp 
-        ref={microAppRef}
-        name="dashboard" 
-        entry="//localhost:8080" 
-      />
-    </div>
-  );
-}
-```
-
-## 🚀 Performance Optimization
-
-### Lazy Loading
-
-```tsx
-import React, { Suspense, lazy } from 'react';
-
-// Lazy load the MicroApp component
-const LazyMicroApp = lazy(() => 
-  import('@qiankunjs/react').then(module => ({ default: module.MicroApp }))
-);
-
-function App() {
-  return (
-    <Suspense fallback={<div>Loading...</div>}>
-      <LazyMicroApp 
-        name="dashboard" 
-        entry="//localhost:8080" 
-        autoSetLoading
-      />
-    </Suspense>
-  );
-}
-```
-
-### Memoization
-
-```tsx
-import React, { memo, useMemo } from 'react';
-import { MicroApp } from '@qiankunjs/react';
-
-const MemoizedMicroApp = memo(MicroApp);
-
-function OptimizedApp({ user, settings }) {
-  const microAppProps = useMemo(() => ({
-    userId: user.id,
-    theme: settings.theme,
-    language: settings.language
-  }), [user.id, settings.theme, settings.language]);
-
-  return (
-    <MemoizedMicroApp 
-      name="optimized-app" 
-      entry="//localhost:8080" 
-      {...microAppProps}
-      autoSetLoading
-    />
-  );
-}
-```
-
-## 🐛 Error Handling & Debugging
-
-### Development Mode Error Handling
-
-```tsx
-import React from 'react';
-import { MicroApp } from '@qiankunjs/react';
-
-function DevMicroApp() {
-  const isDevelopment = process.env.NODE_ENV === 'development';
-
-  const handleError = (error: Error) => {
-    console.error('Micro app error:', error);
-    
-    if (isDevelopment) {
-      // Show detailed error in development
-      return (
-        <div style={{ padding: '20px', background: '#ffe6e6' }}>
-          <h3>Development Error</h3>
-          <pre>{error.stack}</pre>
-          <button onClick={() => window.location.reload()}>
-            Reload App
-          </button>
-        </div>
-      );
-    }
-    
-    // Show user-friendly error in production
-    return (
-      <div style={{ padding: '20px', textAlign: 'center' }}>
-        <p>Something went wrong. Please try again later.</p>
-      </div>
-    );
-  };
-
-  return (
-    <MicroApp 
-      name="dashboard" 
-      entry="//localhost:8080" 
-      errorBoundary={handleError}
-      autoSetLoading
-    />
-  );
-}
-```
-
-## 📚 Best Practices
-
-### 1. Use Descriptive Names
-
-```tsx
-// ✅ Good: Descriptive names
-<MicroApp name="user-dashboard" entry="//localhost:8080" />
-<MicroApp name="order-management" entry="//localhost:8081" />
-
-// ❌ Bad: Generic names
-<MicroApp name="app1" entry="//localhost:8080" />
-<MicroApp name="app2" entry="//localhost:8081" />
-```
-
-### 2. Always Handle Loading States
-
-```tsx
-// ✅ Good: the built-in indicator
-<MicroApp name="dashboard" entry="//localhost:8080" autoSetLoading />
-
-// ✅ Good: your own loading slot, which needs no flag next to it
-<MicroApp 
-  name="dashboard" 
-  entry="//localhost:8080" 
-  loader={(loading) => <CustomSpinner loading={loading} />}
-/>
-
-// ❌ Bad: No loading indication
-<MicroApp name="dashboard" entry="//localhost:8080" />
-```
-
-### 3. Implement Error Boundaries
-
-```tsx
-// ✅ Good: render failures instead of letting them escape the component
-<MicroApp 
-  name="dashboard" 
-  entry="//localhost:8080" 
-  errorBoundary={(error) => <ErrorFallback error={error} />}
-/>
-
-// ✅ Good: the built-in error panel
-<MicroApp name="dashboard" entry="//localhost:8080" autoCaptureError />
-```
-
-### 4. Use Environment-specific Configurations
-
-```tsx
-// ✅ Good: Environment-aware
-const config = {
-  development: { entry: '//localhost:8080', debug: true },
-  production: { entry: '//app.example.com', debug: false }
-};
-
-<MicroApp 
-  name="dashboard" 
-  entry={config[process.env.NODE_ENV].entry}
-  debug={config[process.env.NODE_ENV].debug}
-/>
-```
-
-## 🔗 Related Documentation
-
-- [Vue Bindings](/ecosystem/vue) - Vue UI bindings
-- [Core APIs](/api/) - qiankun core APIs
-- [Configuration](/api/configuration) - Configuration options
-- [Lifecycles](/api/lifecycles) - Lifecycle hooks
-
-## 🧪 Working Examples
-
-Both shells in this repository drive a single `<MicroApp />` from their own router — the route picks `name` and `entry`, leaving the route unmounts the app, and no `key` is involved:
-
-- [`examples/main`](https://github.com/umijs/qiankun/tree/next/examples/main) - the React shell, including loader and error slots used as overlays
-- [`examples/vue-host`](https://github.com/umijs/qiankun/tree/next/examples/vue-host) - the same stage built with the Vue bindings
+- Mounting is keyed on `name`; changing it remounts a brand-new app.
+- Prop updates are driven by a deep comparison of the forwarded props and go through `microApp.update`.
+- When the instance status is `MOUNTED`, the component marks it as unmounting before teardown so prop updates do not race with unmount.
+
+## Related
+
+- [loadMicroApp](/api/load-micro-app) — the facade API this component wraps.
+- [AppConfiguration](/api/configuration) — the shape of `settings`.
+- [Lifecycle hooks](/api/lifecycles) — the shape of `lifeCycles`.
+- [The `<MicroApp>` component for Vue](/ecosystem/vue) — the Vue version (note: Vue passes app props through a dedicated `appProps` object).
+- [Running multiple micro-app instances at once](/cookbook/run-multiple-instances)

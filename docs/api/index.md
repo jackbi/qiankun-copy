@@ -1,118 +1,71 @@
-# API Reference
+# API reference overview
 
-qiankun provides a simple yet powerful API set for building micro-frontend applications. All APIs are fully typed with TypeScript definitions to ensure both developer experience and type safety.
+The recommended way to use `qiankun` is to load and manage a micro-app instance on demand with [`loadMicroApp`](/api/load-micro-app). It mounts the app immediately and returns a handle for updating, inspecting, and unmounting it.
 
-## 📚 Core APIs
-
-### Application Registration & Startup
-
-| API | Description | Type |
-|-----|-------------|------|
-| [`registerMicroApps`](/api/register-micro-apps) | Register micro applications | `(apps: RegistrableApp[], lifeCycles?: LifeCycles) => void` |
-| [`start`](/api/start) | Start qiankun framework | `(opts?: StartOpts) => void` |
-| [`loadMicroApp`](/api/load-micro-app) | Manually load micro application | `(app: LoadableApp, configuration?: AppConfiguration, lifeCycles?: LifeCycles) => MicroApp` |
-
-### Utility APIs
-
-| API | Description | Type |
-|-----|-------------|------|
-| [`isRuntimeCompatible`](/api/is-runtime-compatible) | Check runtime compatibility | `() => boolean` |
-
-## 🎯 Quick Navigation
-
-### By Use Case
-
-**Route-based Mode**
-```typescript
-import { registerMicroApps, start } from 'qiankun';
-
-// 1. Register micro apps
-registerMicroApps([...]);
-
-// 2. Start framework
-start();
-```
-
-**Manual Loading Mode**
-```typescript
+```ts
 import { loadMicroApp } from 'qiankun';
 
-// Manually load micro app
-const microApp = loadMicroApp({...});
+const microApp = loadMicroApp({
+  name: 'sub-app',
+  entry: '//localhost:7101',
+  container: document.getElementById('subapp-container')!,
+});
+
+// Release the instance when it is no longer needed.
+await microApp.unmount();
 ```
 
-**Compatibility Check**
-```typescript
-import { isRuntimeCompatible } from 'qiankun';
+When an app must activate automatically with the URL, use [`registerMicroApps`](/api/register-micro-apps) with [`start`](/api/start). This is a route-driven alternative, not a prerequisite for `loadMicroApp`.
 
-if (isRuntimeCompatible()) {
-  // Start micro-frontend application
-}
+## Public exports
+
+| Export | Purpose |
+| --- | --- |
+| [`loadMicroApp`](/api/load-micro-app) | Load and mount one micro-app immediately, returning a [`MicroApp`](/api/types) handle. |
+| [`registerMicroApps`](/api/register-micro-apps) | Register micro-apps driven by URL `activeRule` values. |
+| [`start`](/api/start) | Start route-driven registration mode. You normally do not call it when using `loadMicroApp` directly. |
+| [`setDefaultMountApp`](/api/effects) | Navigate to a default app route when no app is mounted. |
+| [`runAfterFirstMounted`](/api/effects) | Run a callback once after the first micro-app mounts. |
+| [`addErrorHandler` / `removeErrorHandler`](/api/error-handling) | Add or remove a global error handler. |
+| [`isRuntimeCompatible`](/api/is-runtime-compatible) | Probe whether the browser supports the qiankun v3 base runtime. |
+| [`prefetchApps`](/api/prefetch-apps) | Deprecated manual prefetch API. |
+
+## Two loading modes
+
+### On demand: `loadMicroApp`
+
+Use it for page regions, components, modals, and apps controlled by host state. The host decides when to create and unmount each instance.
+
+```ts
+function loadMicroApp<T extends ObjectType>(
+  app: LoadableApp<T>,
+  configuration?: AppConfiguration,
+  lifeCycles?: LifeCycles<T>,
+): MicroApp;
 ```
 
-### By Functionality
+The returned handle exposes `mount`, `unmount`, `getStatus`, and lifecycle promises. It exposes `update` only when the micro-app exports that optional lifecycle. Call `unmount()` for every instance you no longer use.
 
-| Category | Related APIs | Description |
-|----------|--------------|-------------|
-| **App Management** | `registerMicroApps`, `loadMicroApp` | Register and load micro applications |
-| **Framework Control** | `start` | Framework startup and configuration |
-| **Utilities** | `isRuntimeCompatible` | Helper utility methods |
+### Route driven: `registerMicroApps` + `start`
 
-## 🔧 Type Definitions
+Use this mode when the URL completely determines whether an app is mounted. Register the applications and their `activeRule` values, then call `start()` so single-spa can activate and unmount them automatically.
 
-qiankun provides complete TypeScript type definitions:
-
-```typescript
-import type {
-  RegistrableApp,
-  LoadableApp,
-  MicroApp,
-  LifeCycles,
-  AppConfiguration,
-} from 'qiankun';
+```ts
+registerMicroApps(apps, lifeCycles?);
+start(opts?);
 ```
 
-See [Type Definitions](/api/types) for detailed information.
+See [Loading a micro-app instance](/concepts/architecture) for help choosing between the two modes.
 
-## 📖 Detailed Documentation
+## Configuration, lifecycles, and types
 
-### Core APIs
-- [registerMicroApps](/api/register-micro-apps) - Register micro applications
-- [start](/api/start) - Start qiankun framework
-- [loadMicroApp](/api/load-micro-app) - Manually load micro applications
-- [isRuntimeCompatible](/api/is-runtime-compatible) - Runtime compatibility check
+- [`AppConfiguration`](/api/configuration): sandboxing, style isolation, custom fetch, and advanced transformation options.
+- [`LifeCycles`](/api/lifecycles): host-provided observation hooks around loading, mounting, and unmounting.
+- [`MicroApp`, `LoadableApp`, and other types](/api/types): complete type declarations.
+- [Micro-app lifecycle and props](/concepts/lifecycle-and-props): the `bootstrap`, `mount`, and `unmount` contract implemented by a micro-app.
 
-### Reference Documentation
-- [Lifecycles](/api/lifecycles) - Application lifecycle hooks
-- [Configuration](/api/configuration) - Framework configuration options
-- [Types](/api/types) - TypeScript type definitions
+## Migration and deprecations
 
-## 💡 Usage Recommendations
+Use the [migration guide](/cookbook/migrate-from-2x) as the single source of truth when upgrading from qiankun 2.x. Individual API pages describe only current behavior.
 
-### Recommended API Usage Patterns
-
-1. **Standard Route-based Mode** (Recommended)
-   ```typescript
-   registerMicroApps([...]) → start()
-   ```
-
-2. **Dynamic Loading Mode**
-   ```typescript
-   loadMicroApp({...}) 
-   ```
-
-3. **Hybrid Mode**
-   ```typescript
-   registerMicroApps([...]) → start() + loadMicroApp({...})
-   ```
-
-### Best Practices
-
-- ✅ Use TypeScript for complete type support
-- ✅ Register all micro apps before starting the framework
-- ✅ Use lifecycle hooks appropriately for state management
-- ✅ Configure proper error handling
-
-- ❌ Avoid registering duplicate app names
-- ❌ Avoid calling main app APIs from micro apps
-- ❌ Avoid time-consuming operations in lifecycle hooks 
+`prefetchApps` is deprecated. Streaming HTML Entry loading discovers and preloads resources while parsing an entry. See [Optimize loading](/cookbook/optimize-loading) for current guidance.

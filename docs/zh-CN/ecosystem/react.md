@@ -1,797 +1,288 @@
-# React 绑定
+# React `<MicroApp>` 组件（@qiankunjs/react）
 
-qiankun 的官方 React 绑定提供了一种声明式的方式来将微应用集成到您的 React 主应用中。`@qiankunjs/react` 包提供了一个强大的 `<MicroApp />` 组件，内置加载状态、错误处理和完整的 TypeScript 类型。
+`@qiankunjs/react` 提供 `MicroApp` 组件，用于在 React 组件树中挂载 qiankun 微应用。该组件封装了 [`loadMicroApp`](/zh-CN/api/load-micro-app)，并根据 React 组件的生命周期完成微应用的挂载、更新和卸载，无需在业务代码中自行管理实例句柄。
 
-## 📦 安装
+当 React 主应用需要在路由页面或局部面板中以组件形式使用微应用，而不希望通过 [`registerMicroApps`](/zh-CN/api/register-micro-apps) 进行全局注册时，可使用该组件。
+
+## 安装
 
 ```bash
-npm install @qiankunjs/react
+npm install @qiankunjs/react@rc qiankun@rc
 ```
 
-**要求：**
+主应用必须安装 `react` 和 `react-dom`，两者的版本均需满足 `>=16.9.0`。
 
-- React ≥ 16.9.0
-- qiankun ≥ 3.0.0
+## 基础用法
 
-## 🚀 快速开始
-
-### 基本用法
+`name` 和 `entry` 是仅有的两个必填 prop。`entry` 用于指定微应用 HTML 入口的 URL。
 
 ```tsx
-import React from 'react';
 import { MicroApp } from '@qiankunjs/react';
 
-function App() {
-  return (
-    <div className="main-app">
-      <h1>主应用</h1>
-      <MicroApp name="dashboard" entry="//localhost:8080" />
-    </div>
-  );
-}
-
-export default App;
-```
-
-### 带加载状态
-
-```tsx
-import React from 'react';
-import { MicroApp } from '@qiankunjs/react';
-
-function App() {
-  return (
-    <MicroApp
-      name="dashboard"
-      entry="//localhost:8080"
-      autoSetLoading // 使用内置的加载态组件
-    />
-  );
+export default function Page() {
+  return <MicroApp name="app1" entry="http://localhost:8000" />;
 }
 ```
 
-微应用挂载完成（进入 `MOUNTED` 状态）或加载失败时，加载态都会结束。如果你更想自己画加载动画，直接传 `loader` 即可，不需要同时传 `autoSetLoading`（见下文「自定义加载组件」）。
+组件会渲染一个 `<div>` 作为挂载容器，并在组件卸载时自动卸载微应用。
 
-### 带错误处理
+::: warning `name` 和 `entry` 均为必填项
+缺少 `name` 或 `entry` 时，组件仅输出错误日志 `the name and entry of MicroApp is needed`，不会加载微应用，也不会抛出异常。因此，必须同时提供这两个 prop。
+:::
 
-```tsx
-import React from 'react';
-import { MicroApp } from '@qiankunjs/react';
+## Props
 
-function App() {
-  return (
-    <MicroApp
-      name="dashboard"
-      entry="//localhost:8080"
-      autoSetLoading
-      autoCaptureError // 使用内置的错误展示组件
-    />
-  );
-}
+```ts
+// 组件导出的类型
+export type Props = SharedProps & SharedSlots<React.ReactNode> & Record<string, unknown>;
 ```
 
-### 配置沙箱与样式隔离
+类型末尾的 `Record<string, unknown>` 用于接收任意附加 prop。除下表列出的保留 prop 外，其他 prop 都会原样传递给微应用。React 绑定不提供单独的 `appProps` 属性，附加 prop 本身即为微应用接收的 props。
 
-组件本身不定义沙箱相关的属性，该微应用的所有 qiankun 配置都通过 `settings` 传入：
+### 组件 props
 
-```tsx
-<MicroApp name="dashboard" entry="//localhost:8080" settings={{ sandbox: { styleIsolation: true } }} />
-```
+| 属性 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `name` * | `string` | — | 微应用实例的名称。值发生变化时，组件会卸载当前实例并创建新实例。 |
+| `entry` * | `string` | — | 微应用的 HTML 入口地址。 |
+| `settings` | [`AppConfiguration`](/zh-CN/api/configuration) | — | 传递给 `loadMicroApp` 的加载器和沙箱配置。 |
+| `lifeCycles` | [`LifeCycles`](/zh-CN/api/lifecycles) | — | 由主应用提供的生命周期钩子，如 `beforeLoad`、`beforeMount`。 |
+| `autoSetLoading` | `boolean` | `false` | 是否渲染内置加载界面，并在应用挂载完成后自动结束加载状态。 |
+| `autoCaptureError` | `boolean` | `false` | 是否使用内置错误边界处理加载错误。 |
+| `wrapperClassName` | `string` | — | 附加在包裹元素内置类名之前的自定义类名。仅在启用加载界面或错误边界时生效。 |
+| `className` | `string` | — | 附加在挂载容器内置类名之前的自定义类名。 |
+| `loader` | `(loading: boolean) => ReactNode` | — | 用于自定义加载界面的渲染函数。 |
+| `errorBoundary` | `(error: Error) => ReactNode` | — | 用于自定义错误界面的渲染函数。 |
 
-不传 `settings` 时 JS 沙箱默认开启、样式隔离默认关闭。`settings` 只在挂载时读取一次，挂载之后再修改它不会生效（见下文「动态切换微应用」）。完整选项见[配置](/zh-CN/api/configuration)与[样式隔离](/zh-CN/cookbook/style-isolation)。
+`*` 表示必填。
 
-## 🎯 组件 API
+除组件过滤的字段外，其他 prop 会在每次渲染时进行深度比较，并传递给微应用。详见[向微应用传递 props](#passing-props-to-the-micro-app)。
 
-### 属性
+::: info 组件过滤的字段
+组件自身消费的所有字段——`name`、`entry`、`settings`、`lifeCycles`、`autoSetLoading`、`autoCaptureError`、`loader`、`errorBoundary`、`wrapperClassName` 和 `className`——都会在调用微应用生命周期前从 props 中移除，不会到达微应用。
+:::
 
-| 属性               | 类型                                       | 必需 | 默认值      | 描述                                                                                     |
-| ------------------ | ------------------------------------------ | ---- | ----------- | ---------------------------------------------------------------------------------------- |
-| `name`             | `string`                                   | ✅   | -           | 微应用的唯一名称，也是组件判断「是否换了一个应用」的唯一依据                             |
-| `entry`            | `string`                                   | ✅   | -           | 微应用的 HTML 入口地址，只在挂载时读取                                                   |
-| `settings`         | `AppConfiguration`                         | ❌   | `undefined` | 该微应用的 qiankun 配置（沙箱、样式隔离、fetch 等），不传时按 `{}` 处理，只在挂载时读取   |
-| `lifeCycles`       | `LifeCycles`                               | ❌   | `undefined` | 该微应用的生命周期钩子，只在挂载时读取，且不要闭包捕获组件状态（见下文）                  |
-| `autoSetLoading`   | `boolean`                                  | ❌   | `false`     | 使用内置的加载态组件                                                                     |
-| `loader`           | `(loading: boolean) => React.ReactNode`     | ❌   | `undefined` | 自定义加载态组件，可单独使用；与 `autoSetLoading` 同时传入时以它为准                      |
-| `autoCaptureError` | `boolean`                                  | ❌   | `false`     | 使用内置的错误展示组件                                                                   |
-| `errorBoundary`    | `(error: Error) => React.ReactNode`         | ❌   | `undefined` | 自定义错误展示组件，可单独使用；与 `autoCaptureError` 同时传入时以它为准                  |
-| `className`        | `string`                                   | ❌   | `undefined` | 微应用容器的 CSS 类                                                                      |
-| `wrapperClassName` | `string`                                   | ❌   | `undefined` | 包装器的 CSS 类（仅在启用了加载态或错误展示、即存在包装器时有效）                      |
+## 向微应用传递 props {#passing-props-to-the-micro-app}
 
-组件自身的属性都有完整类型，传错类型会直接编译报错。
-
-### 额外属性
-
-除组件自身消费的属性之外，传递给 `<MicroApp />` 的任何额外属性都会作为 props 转发给微应用：
+所有未被组件过滤的 prop 都会传递给微应用的 `bootstrap`、`mount` 和 `update` 生命周期。
 
 ```tsx
 <MicroApp
-  name="user-profile"
-  entry="//localhost:8080"
-  // 这些属性会传递给微应用
-  userId={user.id}
+  name="app1"
+  entry="http://localhost:8000"
+  // 作为 props 传递给微应用
+  userId={42}
   theme="dark"
-  permissions={user.permissions}
+  onEvent={(e) => console.log(e)}
 />
 ```
 
-以下属性由组件自己消费，**不会**转发给微应用：`name`、`entry`、`settings`、`lifeCycles`、`autoSetLoading`、`autoCaptureError`、`loader`、`errorBoundary`、`wrapperClassName`、`className`、`appProps`。其中 `appProps` 是 Vue 绑定给微应用 props 准备的通道，React 侧没有这个属性，传了也只会被丢弃——请把属性直接平铺在 `<MicroApp />` 上。
+微应用可通过生命周期函数的 `props` 参数读取这些值：
 
-挂载完成后额外属性发生变化，会通过微应用的 `update` 生命周期送达。组件内部对这些属性做了深比较，值没变就不会触发更新。
-
-### 渲染结构
-
-启用了加载态或错误展示（`loader`、`autoSetLoading`、`errorBoundary`、`autoCaptureError` 任意一个）时，组件会多渲染一层包装器，渲染结果如下：
-
-```tsx
-<div style={{ position: 'relative' }} className={`${wrapperClassName} qiankun-micro-app-wrapper`}>
-  <div className={`${className} qiankun-micro-app-container`} />
-  {/* loader 返回的内容 */}
-  {/* errorBoundary 返回的内容（仅在出错时渲染） */}
-</div>
-```
-
-容器永远排在最前面：qiankun 以容器在 DOM 中的位置（XPath，会数它前面的同标签兄弟节点）作为每个容器的缓存键，如果条件渲染的 loader 排在容器之前，同一个应用会在两次挂载间被拆成两份缓存。也正因为插槽排在容器之后，它们天然覆盖在微应用之上，不需要 `z-index`；包装器自带 `position: relative`，插槽用 `position: absolute` 即可铺满。
-
-都没启用时，只渲染容器本身：
-
-```tsx
-<div className={`${className} qiankun-micro-app-container`} />
-```
-
-## 🔄 生命周期管理
-
-### 使用 Ref 访问微应用实例
-
-```tsx
-import React, { useRef } from 'react';
-import { MicroApp, type MicroAppType } from '@qiankunjs/react';
-
-function App() {
-  const microAppRef = useRef<MicroAppType>(undefined);
-
-  const handleCheckStatus = () => {
-    // 获取微应用状态
-    console.log(microAppRef.current?.getStatus());
-  };
-
-  return (
-    <div>
-      <button onClick={handleCheckStatus}>查看微应用状态</button>
-      <MicroApp ref={microAppRef} name="dashboard" entry="//localhost:8080" />
-    </div>
-  );
+```ts
+export async function mount(props) {
+  console.log(props.userId, props.theme);
 }
 ```
 
-几点说明：
+这些 prop 发生变化后，组件会使用 Lodash 的 `isEqual` 进行深度比较。如果微应用导出了 `update` 生命周期，且实例状态为 `MOUNTED`，组件会调用 `microApp.update(props)`，不会重新挂载微应用。
 
-- `MicroAppType` 由 `@qiankunjs/react` 直接导出；在 React 19 的类型下 `useRef<MicroAppType>()` 无法通过编译，必须显式写成 `useRef<MicroAppType>(undefined)`。
-- ref 的值只在 React 渲染提交时刷新，因此在父组件的挂载副作用（`useEffect(..., [])`）里读到的仍然是 `undefined`，请在事件回调或后续渲染中读取。
-- 卸载交给组件本身：条件渲染或路由切走时组件会自动卸载微应用。不要手动调用 `microAppRef.current.unmount()`，那会与组件内部的挂载/卸载串行链冲突。
+::: tip 重新挂载与更新
+修改 `name` 会卸载当前实例并创建新实例；修改传递给微应用的其他 prop 只会尝试更新当前实例。如需完全重置实例，可修改 `name`，或为组件设置新的 `key`。组件仅以 `name` 作为重新挂载的依赖，因此仅修改 `entry`、`settings` 或 `lifeCycles` 不会创建新实例。
+:::
 
-### 生命周期钩子
+## 加载状态
 
-`lifeCycles` 会原样交给 qiankun，作用于当前这个微应用：
+内部的 `loading` 状态初始值为 `true`，并在应用的 `mountPromise` 敲定（无论成功还是失败）后被清除。该行为与 `autoSetLoading` 无关：该开关只决定是否渲染内置加载界面，若把状态本身也交由它控制，自定义 `loader` 就会一直转下去。未提供任何加载界面时，该状态不会产生可见效果。
 
-```tsx
-import React from 'react';
-import { MicroApp } from '@qiankunjs/react';
-import { type LifeCycles } from 'qiankun';
-
-// 在组件外定义：不要闭包捕获组件状态
-const lifeCycles: LifeCycles<Record<string, unknown>> = {
-  beforeLoad: async (app) => {
-    console.log(`即将加载 ${app.name}`);
-  },
-  afterMount: async (app) => {
-    console.log(`${app.name} 挂载完成`);
-  },
-  beforeUnmount: async (app) => {
-    console.log(`${app.name} 即将卸载`);
-  },
-};
-
-function App() {
-  return <MicroApp name="dashboard" entry="//localhost:8080" lifeCycles={lifeCycles} />;
-}
-```
-
-qiankun 以 `(name, 容器)` 为键缓存微应用的 parcel 配置，生命周期钩子也在其中。也就是说：**第一次加载进某个容器时捕获到的那组钩子，会一直被后续的挂载复用。** 所以钩子里不要闭包捕获组件状态（否则读到的永远是第一次挂载时的旧值），需要根据加载进度更新界面时请用 `loader` 插槽。可用钩子及其时机见[生命周期](/zh-CN/api/lifecycles)。
-
-### 应用状态
-
-微应用实例提供这些状态值：
-
-- `NOT_LOADED` - 初始状态，尚未加载
-- `LOADING_SOURCE_CODE` - 加载应用资源中
-- `NOT_BOOTSTRAPPED` - 资源已加载，尚未引导
-- `BOOTSTRAPPING` - 运行引导生命周期
-- `NOT_MOUNTED` - 已引导但未挂载
-- `MOUNTING` - 运行挂载生命周期
-- `MOUNTED` - 成功挂载并运行
-- `UPDATING` - 运行更新生命周期
-- `UNMOUNTING` - 运行卸载生命周期
-- `UNLOADING` - 清理资源
-
-## 🎨 自定义
-
-### 自定义加载组件
+### 内置加载界面
 
 ```tsx
-import React from 'react';
-import { MicroApp } from '@qiankunjs/react';
-import { Spin } from 'antd';
-
-const CustomLoader: React.FC<{ loading: boolean }> = ({ loading }) => {
-  if (!loading) return null;
-
-  return (
-    <div style={{ position: 'absolute', inset: 0, textAlign: 'center', padding: '50px' }}>
-      <Spin size="large" />
-      <p style={{ marginTop: '16px' }}>加载微应用中...</p>
-    </div>
-  );
-};
-
-function App() {
-  return <MicroApp name="dashboard" entry="//localhost:8080" loader={(loading) => <CustomLoader loading={loading} />} />;
-}
+<MicroApp name="app1" entry="http://localhost:8000" autoSetLoading />
 ```
 
-`loader` 的类型是 `(loading: boolean) => React.ReactNode`：`loading` 为 `true` 表示仍在加载，`false` 表示加载结束（挂载完成或出错）。它可以单独使用，不需要搭配 `autoSetLoading`。因为它渲染在容器之后，用 `position: absolute` 就能盖在微应用之上。
+内置加载界面仅提供占位内容，渲染结果为文本 `loading...`。生产环境通常应通过 `loader` 提供自定义加载界面。
+
+### 自定义加载界面
+
+```tsx
+<MicroApp
+  name="app1"
+  entry="http://localhost:8000"
+  loader={(loading) => <Spinner spinning={loading} />}
+/>
+```
+
+自定义 `loader` 可独立生效，且优先级高于内置加载界面，因此无需再配合 `autoSetLoading`。`wrapperClassName` 仅在加载界面或错误界面启用时生效，因为组件只在这两种情况下渲染带定位样式的包裹元素。
+
+## 错误处理
+
+默认情况下，加载、`bootstrap` 和 `mount` 阶段的错误会从异步加载流程中重新抛出。建议启用内置错误界面或提供自定义错误界面，避免产生未处理的 Promise 拒绝。
+
+::: danger 处理异步加载错误
+如果既未启用 `autoCaptureError`，也未提供 `errorBoundary`，组件会重新抛出异步加载错误。React 错误边界无法捕获 Promise 回调中的错误，因此应配置组件自身的错误界面。
+:::
+
+### 内置错误边界
+
+```tsx
+<MicroApp name="app1" entry="http://localhost:8000" autoCaptureError />
+```
+
+内置错误边界只渲染一个包含 `error.message` 的 `<div>`。生产环境通常应通过 `errorBoundary` 提供自定义错误界面。
 
 ### 自定义错误边界
 
 ```tsx
-import React from 'react';
-import { MicroApp } from '@qiankunjs/react';
-import { Alert, Button } from 'antd';
+<MicroApp
+  name="app1"
+  entry="http://localhost:8000"
+  errorBoundary={(error) => <ErrorPanel message={error.message} />}
+/>
+```
 
-const CustomErrorBoundary: React.FC<{ error: Error }> = ({ error }) => {
-  const handleRetry = () => {
-    window.location.reload();
+### 同时启用加载状态和错误处理
+
+```tsx
+<MicroApp
+  name="app1"
+  entry="http://localhost:8000"
+  autoSetLoading
+  autoCaptureError
+/>
+```
+
+完整的错误处理方式参见[处理微应用错误](/zh-CN/cookbook/handle-errors)和 [addErrorHandler / removeErrorHandler](/zh-CN/api/error-handling)。
+
+## 通过 ref 访问运行中的实例
+
+组件使用 `forwardRef` 转发 ref。该 ref 指向当前微应用的实例句柄，即 `@qiankunjs/single-spa` 的 Parcel（对应 `qiankun` 的 `MicroApp` 类型，`@qiankunjs/react` 以 `MicroAppType` 重新导出）。通过该句柄可查询实例状态，也可等待各生命周期 Promise 完成。
+
+```tsx
+import { useRef } from 'react';
+import { MicroApp } from '@qiankunjs/react';
+import { type MicroAppType } from '@qiankunjs/react';
+
+function Page() {
+  const microAppRef = useRef<MicroAppType>(undefined);
+
+  const logStatus = () => {
+    console.log(microAppRef.current?.getStatus());
   };
 
   return (
-    <div style={{ padding: '20px' }}>
-      <Alert
-        message="微应用错误"
-        description={error.message}
-        type="error"
-        action={
-          <Button size="small" danger onClick={handleRetry}>
-            重试
-          </Button>
-        }
+    <>
+      <button type="button" onClick={logStatus}>查看状态</button>
+      <MicroApp
+        name="app1"
+        entry="http://localhost:8000"
+        autoSetLoading
+        ref={microAppRef}
       />
-    </div>
-  );
-};
-
-function App() {
-  return (
-    <MicroApp
-      name="dashboard"
-      entry="//localhost:8080"
-      errorBoundary={(error) => <CustomErrorBoundary error={error} />}
-    />
+    </>
   );
 }
 ```
 
-`errorBoundary` 的类型是 `(error: Error) => React.ReactNode`，同样可以单独使用，不需要搭配 `autoCaptureError`。
+### ref 句柄
 
-### 样式设置
+该句柄实现 single-spa 的 Parcel 接口：
+
+| 成员 | 类型 | 说明 |
+| --- | --- | --- |
+| `getStatus()` | `() => Status` | 返回当前生命周期状态，取值见下文。 |
+| `mount()` | `() => Promise<null>` | 挂载应用。 |
+| `unmount()` | `() => Promise<null>` | 卸载应用。 |
+| `update?(props)` | `(props) => Promise<unknown>` | 传入新的 props。仅当应用导出 `update` 生命周期时存在。 |
+| `loadPromise` | `Promise<null>` | 表示源代码加载阶段完成的 Promise。 |
+| `bootstrapPromise` | `Promise<null>` | 表示 `bootstrap` 阶段完成的 Promise。 |
+| `mountPromise` | `Promise<null>` | 表示应用挂载阶段完成的 Promise。 |
+| `unmountPromise` | `Promise<null>` | 表示应用卸载阶段完成的 Promise。 |
+
+`getStatus()` 返回以下状态之一：`NOT_LOADED`、`LOADING_SOURCE_CODE`、`NOT_BOOTSTRAPPED`、`BOOTSTRAPPING`、`NOT_MOUNTED`、`MOUNTING`、`MOUNTED`、`UPDATING`、`UNMOUNTING`、`UNLOADING`、`SKIP_BECAUSE_BROKEN`、`LOAD_ERROR`。
+
+::: warning 由组件管理生命周期
+ref 主要用于查询状态和等待生命周期 Promise。不应通过 ref 直接调用 `mount()` 或 `unmount()`。组件会统一处理挂载、更新和卸载；绕过组件调用这些方法可能破坏内部状态。
+:::
+
+## 传递配置
+
+加载器和沙箱相关选项通过 `settings` 传递，其类型为 [`AppConfiguration`](/zh-CN/api/configuration)。
 
 ```tsx
-import React from 'react';
-import { MicroApp } from '@qiankunjs/react';
-import './MicroApp.css';
-
-function App() {
-  return (
-    <MicroApp
-      name="dashboard"
-      entry="//localhost:8080"
-      className="micro-app-container"
-      wrapperClassName="micro-app-wrapper"
-      autoSetLoading
-    />
-  );
-}
+<MicroApp
+  name="app1"
+  entry="http://localhost:8000"
+  settings={{ sandbox: { styleIsolation: true } }}
+/>
 ```
+
+`settings` 会原样传给 `loadMicroApp`，组件不会替你填任何默认项。`sandbox.styleIsolation` 的行为参见[样式隔离](/zh-CN/concepts/style-isolation)，`sandbox` 本身的行为参见 [JavaScript 隔离](/zh-CN/concepts/js-sandbox)。
+
+## 生命周期钩子
+
+主应用的生命周期钩子通过 `lifeCycles` 传递，并在当前微应用加载、挂载和卸载的相应阶段执行。每个钩子可以是单个函数或函数数组。
+
+```tsx
+<MicroApp
+  name="app1"
+  entry="http://localhost:8000"
+  lifeCycles={{
+    beforeMount: async (app) => console.log('before mount', app.name),
+    afterMount: async (app) => console.log('mounted', app.name),
+  }}
+/>
+```
+
+完整的钩子列表和签名参见[生命周期钩子](/zh-CN/api/lifecycles)。
+
+## 样式钩子
+
+组件会添加以下两个 CSS 类名，可用于编写自定义样式：
+
+| 元素 | CSS 类名 |
+| --- | --- |
+| 包裹元素（仅在加载界面或错误边界生效时渲染） | `qiankun-micro-app-wrapper` |
+| 挂载容器（始终渲染） | `qiankun-micro-app-container` |
 
 ```css
-/* MicroApp.css */
-.micro-app-wrapper {
-  border: 1px solid #e8e8e8;
-  border-radius: 6px;
-  overflow: hidden;
+.qiankun-micro-app-wrapper {
+  position: relative; /* 组件已设置内联样式，此处可补充布局规则 */
 }
 
-.micro-app-container {
-  min-height: 400px;
-  background: #fafafa;
+.qiankun-micro-app-container {
+  min-height: 240px;
 }
 ```
 
-`className` 落在容器上，`wrapperClassName` 落在包装器上；两个类名都会与组件自带的 `qiankun-micro-app-container` / `qiankun-micro-app-wrapper` 合并，而只有启用了加载态或错误展示时才会有包装器。
+`wrapperClassName` 和 `className` 指定的值会分别添加到以上类名之前，不会替换 qiankun 提供的类名。
 
-## 🔧 高级用法
+## 运行机制
 
-### 多个微应用
-
-```tsx
-import React, { useState } from 'react';
-import { MicroApp } from '@qiankunjs/react';
-import { Tabs } from 'antd';
-
-function Dashboard() {
-  const [activeTab, setActiveTab] = useState('dashboard');
-
-  const items = [
-    {
-      key: 'dashboard',
-      label: '仪表盘',
-      children: <MicroApp name="dashboard" entry="//localhost:8080" autoSetLoading />,
-    },
-    {
-      key: 'analytics',
-      label: '分析',
-      children: <MicroApp name="analytics" entry="//localhost:8081" autoSetLoading />,
-    },
-    {
-      key: 'settings',
-      label: '设置',
-      children: <MicroApp name="settings" entry="//localhost:8082" autoSetLoading />,
-    },
-  ];
-
-  return (
-    <div className="multi-app-container">
-      <Tabs activeKey={activeTab} onChange={setActiveTab} items={items} />
-    </div>
-  );
-}
+```mermaid
+flowchart TD
+  A[渲染 MicroApp] --> B{是否同时提供 name 和 entry}
+  B -- 否 --> B0[输出错误日志并停止]
+  B -- 是 --> C["loading = true, mountMicroApp()"]
+  C --> D["loadMicroApp(app, settings, lifeCycles)"]
+  D --> E{mountPromise}
+  E -- 成功 --> F["loading = false"]
+  E -- 失败 --> G{是否启用 autoCaptureError 或配置 errorBoundary}
+  G -- 是 --> H["setError(err)"]
+  G -- 否 --> I["重新抛出异步错误"]
+  J[name 变化] --> K[卸载旧实例并挂载新实例]
+  L[传递的 props 变化] --> M["深度比较后调用 microApp.update(props)"]
+  N[组件卸载] --> O[卸载微应用]
 ```
 
-也可以只用一个 `<MicroApp />`，由路由决定 `name` 与 `entry`（仓库里的 `examples/main` 就是这么做的）：切走时组件卸载旧应用，切回来时再挂载，容器身份保持不变，可以命中 qiankun 的缓存。
-
-### 条件加载
-
-```tsx
-import React, { useState } from 'react';
-import { MicroApp } from '@qiankunjs/react';
-import { getCurrentUser } from './auth';
-
-function ConditionalApp() {
-  const [showMicroApp, setShowMicroApp] = useState(false);
-  const user = getCurrentUser();
-
-  // 只有用户认证后才加载微应用
-  if (!user) {
-    return <div>请登录以继续</div>;
-  }
-
-  return (
-    <div>
-      <button onClick={() => setShowMicroApp(!showMicroApp)}>{showMicroApp ? '隐藏' : '显示'} 微应用</button>
-
-      {showMicroApp && (
-        <MicroApp
-          name="protected-app"
-          entry="//localhost:8080"
-          userId={user.id}
-          permissions={user.permissions}
-          autoSetLoading
-          autoCaptureError
-        />
-      )}
-    </div>
-  );
-}
-```
-
-停止渲染 `<MicroApp />` 就等于卸载微应用：组件的清理逻辑会等正在进行的挂载结束后再执行卸载，宿主不需要额外处理。
-
-### 动态切换微应用（name 与 entry）
-
-`name` 是微应用的身份标识：组件只在 `name` 变化时卸载旧应用、挂载新应用；`entry`、`settings`、`lifeCycles` 都只在挂载时读取，也不会参与后续的 `update`。因此**只改 `entry`、保持 `name` 不变是没有任何效果的**——既不会重新挂载，新的 `entry` 也不会传给微应用。
-
-要切换目标应用，请让 `name` 一起变化：
-
-```tsx
-import React, { useState } from 'react';
-import { MicroApp } from '@qiankunjs/react';
-
-const targets = {
-  development: { name: 'dashboard-dev', entry: '//localhost:8080' },
-  staging: { name: 'dashboard-staging', entry: '//staging.example.com' },
-  production: { name: 'dashboard-prod', entry: '//app.example.com' },
-};
-
-type Env = keyof typeof targets;
-
-function DynamicApp() {
-  const [environment, setEnvironment] = useState<Env>('development');
-  const target = targets[environment];
-
-  return (
-    <div>
-      <select value={environment} onChange={(e) => setEnvironment(e.target.value as Env)}>
-        <option value="development">开发环境</option>
-        <option value="staging">测试环境</option>
-        <option value="production">生产环境</option>
-      </select>
-
-      <MicroApp name={target.name} entry={target.entry} environment={environment} autoSetLoading />
-    </div>
-  );
-}
-```
-
-如果 `name` 必须保持不变（例如微应用注册名固定），就用 `key` 让 React 重建元素，从而完整地走一遍卸载与挂载：
-
-```tsx
-<MicroApp key={entry} name="dashboard" entry={entry} autoSetLoading />
-```
-
-## 🎮 状态管理
-
-### 使用 Context 共享状态
-
-```tsx
-import React, { createContext, useContext, useState } from 'react';
-import { MicroApp } from '@qiankunjs/react';
-
-interface SharedState {
-  user: { id: number; name: string };
-  theme: string;
-}
-
-// 创建共享状态的 Context
-const AppContext = createContext<SharedState | null>(null);
-
-function MainApp() {
-  const [sharedState] = useState<SharedState>({
-    user: { id: 1, name: 'John' },
-    theme: 'dark',
-  });
-
-  return (
-    <AppContext.Provider value={sharedState}>
-      <div className="main-app">
-        <MicroAppContainer />
-      </div>
-    </AppContext.Provider>
-  );
-}
-
-function MicroAppContainer() {
-  const shared = useContext(AppContext);
-  if (!shared) return null;
-
-  return (
-    <MicroApp
-      name="micro-app"
-      entry="//localhost:8080"
-      // 将 context 数据作为 props 传递
-      user={shared.user}
-      theme={shared.theme}
-      autoSetLoading
-    />
-  );
-}
-```
-
-共享状态变化后，新的 props 会通过微应用的 `update` 生命周期送达（前提是微应用导出了 `update`）。
-
-### 应用间通信
-
-```tsx
-import React, { useEffect } from 'react';
-import { MicroApp } from '@qiankunjs/react';
-
-function CommunicatingApps() {
-  useEffect(() => {
-    // 监听消息
-    const handleMessage = (event: Event) => {
-      console.log('收到消息:', (event as CustomEvent).detail);
-    };
-
-    window.addEventListener('microAppMessage', handleMessage);
-
-    return () => {
-      window.removeEventListener('microAppMessage', handleMessage);
-    };
-  }, []);
-
-  return (
-    <div style={{ display: 'flex' }}>
-      <div style={{ flex: 1 }}>
-        <MicroApp name="app1" entry="//localhost:8080" autoSetLoading />
-      </div>
-      <div style={{ flex: 1 }}>
-        <MicroApp name="app2" entry="//localhost:8081" autoSetLoading />
-      </div>
-    </div>
-  );
-}
-```
-
-更直接的做法是把回调函数作为额外属性透传给微应用：除组件自己消费的那几个属性外，其余属性都会转发过去。
-
-## 🔒 TypeScript 支持
-
-### 类型化属性
-
-组件自身的属性是完整声明的，写错类型会在编译期报错：
-
-```tsx
-import React from 'react';
-import { MicroApp } from '@qiankunjs/react';
-
-// ✅ 类型正确
-<MicroApp
-  name="user-profile"
-  entry="//localhost:8080"
-  settings={{ sandbox: { styleIsolation: true } }}
-  loader={(loading) => (loading ? <Spinner /> : null)}
-  errorBoundary={(error) => <ErrorPanel message={error.message} />}
-/>;
-
-// ❌ 编译报错：autoSetLoading 应为 boolean
-<MicroApp name="user-profile" entry="//localhost:8080" autoSetLoading="yes" />;
-
-// ❌ 编译报错：errorBoundary 的入参是 Error，没有 code 属性
-<MicroApp name="user-profile" entry="//localhost:8080" errorBoundary={(error) => <span>{error.code}</span>} />;
-```
-
-透传给微应用的额外属性走的是索引签名，TypeScript 不会替你校验它们是否符合微应用的契约。想要类型保障，可以在宿主侧声明接口，再展开传入：
-
-```tsx
-interface UserProfileProps {
-  userId: string;
-  theme: 'light' | 'dark';
-  permissions: string[];
-}
-
-function UserProfileApp() {
-  const user = getCurrentUser();
-
-  const microAppProps: UserProfileProps = {
-    userId: user.id,
-    theme: 'dark',
-    permissions: user.permissions,
-  };
-
-  return <MicroApp name="user-profile" entry="//localhost:8080" {...microAppProps} autoSetLoading />;
-}
-```
-
-### 微应用自定义 Hook
-
-```tsx
-import { useRef, useEffect, useState } from 'react';
-import { MicroApp, type MicroAppType } from '@qiankunjs/react';
-
-interface UseMicroAppOptions {
-  onStatusChange?: (status: string) => void;
-  onError?: (error: Error) => void;
-}
-
-export function useMicroApp(options: UseMicroAppOptions = {}) {
-  const microAppRef = useRef<MicroAppType>(undefined);
-  const [status, setStatus] = useState<string>('NOT_LOADED');
-  const [error, setError] = useState<Error | null>(null);
-
-  useEffect(() => {
-    const checkStatus = () => {
-      if (microAppRef.current) {
-        const currentStatus = microAppRef.current.getStatus();
-        if (currentStatus !== status) {
-          setStatus(currentStatus);
-          options.onStatusChange?.(currentStatus);
-        }
-      }
-    };
-
-    const interval = setInterval(checkStatus, 1000);
-    return () => clearInterval(interval);
-  }, [status, options]);
-
-  const handleError = (err: Error) => {
-    setError(err);
-    options.onError?.(err);
-  };
-
-  return {
-    microAppRef,
-    status,
-    error,
-    handleError,
-  };
-}
-
-// 使用方式
-function App() {
-  const { microAppRef, status, error } = useMicroApp({
-    onStatusChange: (status) => console.log('状态变化:', status),
-    onError: (error) => console.error('应用错误:', error),
-  });
-
-  return (
-    <div>
-      <p>状态: {status}</p>
-      {error && <p>错误: {error.message}</p>}
-      <MicroApp ref={microAppRef} name="dashboard" entry="//localhost:8080" />
-    </div>
-  );
-}
-```
-
-## 🚀 性能优化
-
-### 懒加载
-
-```tsx
-import React, { Suspense, lazy } from 'react';
-
-// 懒加载 MicroApp 组件
-const LazyMicroApp = lazy(() => import('@qiankunjs/react').then((module) => ({ default: module.MicroApp })));
-
-function App() {
-  return (
-    <Suspense fallback={<div>加载中...</div>}>
-      <LazyMicroApp name="dashboard" entry="//localhost:8080" autoSetLoading />
-    </Suspense>
-  );
-}
-```
-
-### 记忆化
-
-```tsx
-import React, { memo, useMemo } from 'react';
-import { MicroApp } from '@qiankunjs/react';
-
-const MemoizedMicroApp = memo(MicroApp);
-
-function OptimizedApp({ user, preferences }) {
-  const microAppProps = useMemo(
-    () => ({
-      userId: user.id,
-      theme: preferences.theme,
-      language: preferences.language,
-    }),
-    [user.id, preferences.theme, preferences.language],
-  );
-
-  return <MemoizedMicroApp name="optimized-app" entry="//localhost:8080" {...microAppProps} autoSetLoading />;
-}
-```
-
-组件内部已经对透传的属性做了深比较，值没变不会触发微应用的 `update`。但函数类型的属性每次渲染都是新引用，一定会被判定为变化，需要用 `useCallback` 固化。`loader` 与 `errorBoundary` 属于组件自有属性、不参与转发，所以写成内联箭头函数不会引起微应用更新。
-
-## 🐛 错误处理与调试
-
-### 错误的去向
-
-没有配置 `errorBoundary`、也没有开启 `autoCaptureError` 时，微应用加载或挂载抛出的异常会被重新抛出，需要由上层的 React 错误边界接住。配置了任意一个之后，异常会被渲染成对应内容，同时仍然通过 `console.error` 输出，不会被吞掉。
-
-### 开发模式错误处理
-
-```tsx
-import React from 'react';
-import { MicroApp } from '@qiankunjs/react';
-
-function DevMicroApp() {
-  const isDevelopment = process.env.NODE_ENV === 'development';
-
-  const handleError = (error: Error) => {
-    if (isDevelopment) {
-      // 在开发环境显示详细错误
-      return (
-        <div style={{ padding: '20px', background: '#ffe6e6' }}>
-          <h3>开发环境错误</h3>
-          <pre>{error.stack}</pre>
-          <button onClick={() => window.location.reload()}>重新加载应用</button>
-        </div>
-      );
-    }
-
-    // 在生产环境显示用户友好的错误
-    return (
-      <div style={{ padding: '20px', textAlign: 'center' }}>
-        <p>出现了一些问题，请稍后再试。</p>
-      </div>
-    );
-  };
-
-  return <MicroApp name="dashboard" entry="//localhost:8080" errorBoundary={handleError} autoSetLoading />;
-}
-```
-
-### 开发环境的 StrictMode
-
-React 的 StrictMode 会在开发环境把每个组件多挂载一次（挂载 → 卸载 → 再挂载）。组件把挂载与卸载串在同一条 Promise 链上，卸载会等待正在进行的挂载完成，因此 StrictMode 下不会残留没被卸载的微应用实例——不需要为 qiankun 关闭 StrictMode。
-
-## 📚 最佳实践
-
-### 1. 使用描述性名称
-
-```tsx
-// ✅ 好：描述性名称
-<MicroApp name="user-dashboard" entry="//localhost:8080" />
-<MicroApp name="order-management" entry="//localhost:8081" />
-
-// ❌ 坏：通用名称
-<MicroApp name="app1" entry="//localhost:8080" />
-<MicroApp name="app2" entry="//localhost:8081" />
-```
-
-`name` 同时是 qiankun 缓存键的一部分，也是组件切换应用的唯一依据，值得取一个稳定且有含义的名字。
-
-### 2. 始终处理加载状态
-
-```tsx
-// ✅ 好：自定义加载态，单独传 loader 即可
-<MicroApp name="dashboard" entry="//localhost:8080" loader={(loading) => <CustomSpinner loading={loading} />} />
-
-// ✅ 好：只想要内置样式时用 autoSetLoading
-<MicroApp name="dashboard" entry="//localhost:8080" autoSetLoading />
-
-// ❌ 坏：没有加载指示
-<MicroApp name="dashboard" entry="//localhost:8080" />
-```
-
-### 3. 实现错误展示
-
-```tsx
-// ✅ 好：自定义错误展示，单独传 errorBoundary 即可
-<MicroApp name="dashboard" entry="//localhost:8080" errorBoundary={(error) => <ErrorFallback error={error} />} />
-
-// ✅ 好：内置错误展示
-<MicroApp name="dashboard" entry="//localhost:8080" autoCaptureError />
-```
-
-### 4. 生命周期钩子保持无状态
-
-```tsx
-// ✅ 好：定义在组件外，只依赖入参
-const lifeCycles = {
-  afterMount: async (app) => reportMounted(app.name),
-};
-
-// ❌ 坏：闭包捕获组件状态；钩子只会在首次加载进该容器时被捕获，
-//        后续挂载读到的永远是第一次的旧值
-const statefulLifeCycles = {
-  afterMount: async () => setMounted(currentTab),
-};
-```
-
-界面需要跟随加载进度变化时，请用 `loader` 插槽，而不是在生命周期钩子里改组件状态。
-
-### 5. 使用环境特定的配置
-
-```tsx
-// ✅ 好：环境感知（构建期常量，不涉及运行时切换 entry）
-const config = {
-  development: { entry: '//localhost:8080', debug: true },
-  production: { entry: '//app.example.com', debug: false },
-};
-
-const { entry, debug } = config[process.env.NODE_ENV];
-
-<MicroApp name="dashboard" entry={entry} debug={debug} />;
-```
-
-## 🔗 相关文档
-
-- [Vue 绑定](/zh-CN/ecosystem/vue) - Vue UI 绑定
-- [核心 API](/zh-CN/api/) - qiankun 核心 API
-- [配置](/zh-CN/api/configuration) - 配置选项
-- [生命周期](/zh-CN/api/lifecycles) - 生命周期钩子
-- [样式隔离](/zh-CN/cookbook/style-isolation) - `settings.sandbox.styleIsolation` 的行为
-
-仓库里有两个真实的宿主示例可以对照：`examples/main`（React 主应用外壳）与 `examples/vue-host`（Vue 主应用外壳）。两者都用一个 `<MicroApp />` 承载所有微应用，由自己的路由决定 `name` 与 `entry`，离开路由即卸载，并且没有使用 `key`——切换完全交给绑定处理。
+- `name` 是实例重新挂载的标识。修改该值会卸载旧实例并创建新实例。
+- 组件会深度比较传递给微应用的 props，并通过 `microApp.update` 更新实例。
+- 实例状态为 `MOUNTED` 时，组件会在卸载前设置内部标记，避免卸载开始后继续执行更新。
+
+## 相关内容
+
+- [loadMicroApp](/zh-CN/api/load-micro-app)——组件所封装的核心 API。
+- [AppConfiguration](/zh-CN/api/configuration)——`settings` 的类型定义。
+- [生命周期钩子](/zh-CN/api/lifecycles)——`lifeCycles` 的类型定义。
+- [Vue `<MicroApp>` 组件](/zh-CN/ecosystem/vue)——Vue 绑定通过独立的 `appProps` 对象传递微应用 props。
+- [运行多个微应用实例](/zh-CN/cookbook/run-multiple-instances)。

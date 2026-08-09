@@ -2,171 +2,84 @@
 layout: home
 
 hero:
-  name: Qiankun
-  text: 微前端解决方案
-  tagline: 可能是你见过的最完善的微前端解决方案🧐
+  name: qiankun · 微前端运行时
+  text: 独立交付，按需组合
+  tagline: 使用 loadMicroApp，可将不同团队、不同技术栈的前端应用挂载到页面中的指定区域；各应用均可独立开发和发布。
   image:
-    src: /logo.png
-    alt: Qiankun
+    src: /hero-runtime.svg
+    alt: 主应用在运行时组合多个独立交付的微应用
   actions:
     - theme: brand
-      text: 快速开始
-      link: /zh-CN/guide/quick-start
+      text: 加载第一个微应用
+      link: /zh-CN/guide/getting-started
     - theme: alt
-      text: 在 GitHub 上查看
-      link: https://github.com/umijs/qiankun
+      text: 了解适用场景
+      link: /zh-CN/guide/what-is-qiankun
+    - theme: alt
+      text: 在线示例
+      link: https://examples.qiankunjs.com
 
 features:
-  - icon: 🚀
-    title: 简单
-    details: 兼容任何 JavaScript 框架。构建微前端系统就像使用 iframe 一样简单，但实际上不是 iframe。
-  - icon: 🛡️
-    title: 完整
-    details: 包含构建微前端系统所需的几乎所有基本功能，如样式隔离、JS 沙箱、预加载等。
-  - icon: 🔧
-    title: 生产就绪
-    details: 已经过蚂蚁集团内外大量线上应用的广泛测试和打磨，健壮性值得信赖。
-  - icon: ⚡
-    title: 高性能
-    details: 支持应用预加载，优化用户体验并提高应用切换速度。
-  - icon: 🎯
-    title: 技术栈无关
-    details: 主应用不限制接入应用的技术栈，微应用具备完全自主权。
-  - icon: 🔄
-    title: 状态隔离
-    details: 提供完整的 JS 沙箱机制，确保应用之间不会相互影响。
+  - icon:
+      src: /icons/agnostic.svg
+      alt: 独立的应用边界
+      width: 22
+      height: 22
+      wrap: true
+    title: 独立开发与发布
+    details: 每个微应用可独立选择技术栈、管理代码仓库并安排发布，主应用只在运行时把它们组合到页面上。
+  - icon:
+      src: /icons/scope.svg
+      alt: 挂载到页面区域的应用
+      width: 22
+      height: 22
+      wrap: true
+    title: 按需管理实例
+    details: 使用 loadMicroApp 将应用挂载到指定的 HTMLElement，并通过返回的实例句柄执行更新或卸载。
+  - icon:
+      src: /icons/sandbox.svg
+      alt: 隔离的运行边界
+      width: 22
+      height: 22
+      wrap: true
+    title: 隔离不同技术栈
+    details: JavaScript 沙箱、可选的样式隔离和原生 ESM 支持，可减少多个应用在同一页面中运行时的相互影响。
 ---
 
-## 📦 安装
+## 管理单个微应用实例
 
-::: tip v3 需要从 `rc` 标签安装
-qiankun 3.0 处于 release candidate 阶段，npm 的 `latest` 标签仍指向 2.x，因此需要显式加上 `@rc` 才能装到 v3。
-:::
+在主应用中安装 qiankun：
 
-::: code-group
-
-```bash [npm]
+```bash
 npm install qiankun@rc
 ```
 
-```bash [yarn]
-yarn add qiankun@rc
-```
-
-```bash [pnpm]
-pnpm add qiankun@rc
-```
-
+::: tip v3 目前发布在 `rc` 标签上
+qiankun 3.0 仍处于 RC 阶段，npm 的 `latest` 标签指向的仍是 2.x。安装时需显式指定 `@rc` 才能获得 v3。
 :::
 
-## 🔨 快速开始
+容器创建后即可加载微应用。记得保存返回的实例句柄，后续查询状态、卸载实例都要靠它：
 
-### 主应用
+```ts
+import { loadMicroApp } from 'qiankun';
 
-```typescript
-import { registerMicroApps, start } from 'qiankun';
+const container = document.getElementById('micro-app-slot');
+if (!container) throw new Error('micro-app-slot not found');
 
-// 注册微应用
-registerMicroApps([
-  {
-    name: 'reactApp',
-    entry: '//localhost:7100',
-    container: '#yourContainer',
-    activeRule: '/yourActiveRule',
-  },
-  {
-    name: 'vueApp',
-    entry: { scripts: ['//localhost:7100/main.js'] },
-    container: '#yourContainer2',
-    activeRule: '/yourActiveRule2',
-  },
-]);
+const microApp = loadMicroApp({
+  name: 'orders',
+  entry: '//localhost:7101',
+  container,
+});
 
-// 启动 qiankun
-start();
+await microApp.mountPromise;
+
+// 页面区域销毁前卸载微应用
+await microApp.unmount();
 ```
 
-### 微应用
+微应用需要导出 `bootstrap`、`mount` 和 `unmount`。qiankun 会将其加载到指定的 `HTMLElement` 中，并调用相应的生命周期函数。[快速上手](/zh-CN/guide/getting-started)提供了完整的可运行示例。
 
-```typescript
-/**
- * bootstrap 只会在微应用初始化的时候调用一次
- * mount 会在每次进入微应用时调用
- * unmount 会在每次切出/卸载微应用时调用
- */
-export async function bootstrap() {
-  console.log('react app bootstraped');
-}
+如果微应用的激活状态完全取决于当前 URL，可使用基于路由的 [`registerMicroApps`](/zh-CN/api/register-micro-apps) 和 [`start`](/zh-CN/api/start)。
 
-export async function mount(props) {
-  ReactDOM.render(<App />, props.container ? props.container.querySelector('#root') : document.getElementById('root'));
-}
-
-export async function unmount(props) {
-  ReactDOM.unmountComponentAtNode(
-    props.container ? props.container.querySelector('#root') : document.getElementById('root'),
-  );
-}
-```
-
-## 🌟 为什么选择 qiankun？
-
-<div class="features-grid">
-<div class="feature-card">
-<h3>🎯 零侵入</h3>
-<p>对现有应用几乎零侵入，只需要暴露必要的生命周期函数即可</p>
-</div>
-
-<div class="feature-card">
-<h3>📱 全场景</h3>
-<p>支持基于路由的微应用加载和手动加载模式</p>
-</div>
-
-<div class="feature-card">
-<h3>🔒 安全隔离</h3>
-<p>完整的沙箱解决方案，包括 JS 隔离和 CSS 隔离</p>
-</div>
-
-<div class="feature-card">
-<h3>⚡ 高性能</h3>
-<p>支持预加载、缓存等多种性能优化方案</p>
-</div>
-</div>
-
-## 👥 社区
-
-| GitHub 讨论 | 钉钉群 | 微信群 |
-| --- | --- | --- |
-| [qiankun 讨论](https://github.com/umijs/qiankun/discussions) | <img src="https://mdn.alipayobjects.com/huamei_zvchwx/afts/img/A*GG8zTJaUnTAAAAAAAAAAAAAADuWEAQ/original" width="150" alt="钉钉群二维码" /> | [查看群二维码](https://github.com/umijs/qiankun/discussions/2343) |
-
-<style>
-.features-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 1rem;
-  margin: 2rem 0;
-}
-
-.feature-card {
-  padding: 1.5rem;
-  border: 1px solid var(--vp-c-divider);
-  border-radius: 8px;
-  transition: border-color 0.25s;
-}
-
-.feature-card:hover {
-  border-color: var(--vp-c-brand-1);
-}
-
-.feature-card h3 {
-  margin: 0 0 0.5rem 0;
-  font-size: 1.1rem;
-}
-
-.feature-card p {
-  margin: 0;
-  font-size: 0.9rem;
-  color: var(--vp-c-text-2);
-  line-height: 1.5;
-}
-</style> 
+仓库中的示例应用（两个主应用加载同一组微应用）已部署在 [examples.qiankunjs.com](https://examples.qiankunjs.com)，可直接在线体验。

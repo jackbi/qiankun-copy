@@ -1,415 +1,201 @@
 # loadMicroApp
 
-手动加载微应用。这对于动态加载微应用或当微应用不与路由关联时很有用。
+`loadMicroApp` 是 qiankun 推荐的微应用加载 API。它将微应用挂载到指定的 DOM 元素，并返回管理该实例的句柄。页面区域、标签页、弹窗，以及由主应用状态控制的微应用，均可采用这一方式。
 
-## 🎯 函数签名
+仅当应用必须根据 URL 自动激活时，才需要使用 [registerMicroApps](/zh-CN/api/register-micro-apps) 和 [`start`](/zh-CN/api/start)。
 
-```typescript
+[React `<MicroApp>`](/zh-CN/ecosystem/react) 和 [Vue `<MicroApp>`](/zh-CN/ecosystem/vue) 组件均基于该函数实现。
+
+## 函数签名
+
+```ts
 function loadMicroApp<T extends ObjectType>(
   app: LoadableApp<T>,
   configuration?: AppConfiguration,
-  lifeCycles?: LifeCycles<T>
-): MicroApp
+  lifeCycles?: LifeCycles<T>,
+): MicroApp;
 ```
 
-## 📋 参数
+`loadMicroApp` 返回一个 `MicroApp` 句柄，其底层类型为 single-spa Parcel。该句柄可用于查询状态和卸载应用。函数不会等待加载和挂载完成；如需确定各阶段的完成时机，应等待句柄中对应的 Promise。
 
-### app
+## 参数
 
-- **类型**: `LoadableApp<T>`
-- **必填**: ✅
-- **描述**: 微应用配置
+### `app: LoadableApp<T>`
 
-#### LoadableApp 结构
+用于描述待加载的微应用及其挂载位置。
 
-```typescript
-interface LoadableApp<T extends ObjectType> {
-  name: string;                    // Micro app name, globally unique
-  entry: string | EntryOpts;       // Micro app entry
-  container: string | HTMLElement; // Container for the micro app
-  props?: T;                       // Custom data passed to micro app
-}
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `name` | `string` | 是 | 微应用名称。多个实例可以复用名称；只有并发挂载的实例需要使用不同容器。 |
+| `entry` | `string` | 是 | 微应用 HTML 入口的 URL。仅支持字符串；v3 不再支持 2.x 的对象形式（`{ scripts, styles }`）。 |
+| `container` | `HTMLElement` | 是 | 用于渲染微应用的 DOM 元素。必须传入实际元素，不能使用 CSS 选择器字符串。 |
+| `props` | `T` | 否 | 传递给微应用生命周期函数的数据。 |
+
+```ts
+type ObjectType = Record<string, unknown>;
+
+type LoadableApp<T extends ObjectType> = {
+  name: string;
+  entry: string;
+  container: HTMLElement;
+  props?: T;
+};
 ```
 
-| 属性 | 类型 | 必填 | 描述 |
-|------|------|------|------|
-| `name` | `string` | ✅ | 微应用名称，作为唯一标识符 |
-| `entry` | `string \| EntryOpts` | ✅ | 微应用入口，可以是 URL 或资源配置 |
-| `container` | `string \| HTMLElement` | ✅ | 容器节点选择器或 DOM 元素 |
-| `props` | `T` | ❌ | 传递给微应用的自定义数据 |
+::: warning `container` 必须是元素
+在 qiankun v3 中，`container` 的类型为 `HTMLElement`，不再接受 `string | HTMLElement`。调用前应通过 `document.getElementById(...)` 或框架提供的 ref 获取实际元素。传入选择器字符串会导致类型错误，运行时也无法正常挂载。
+:::
 
-### configuration
+### `configuration?: AppConfiguration`
 
-- **类型**: `AppConfiguration`
-- **必填**: ❌
-- **描述**: 高级配置选项
+单个应用的运行时配置。所有配置项均为可选，默认值由 qiankun 内部处理。
 
-```typescript
-interface AppConfiguration {
-  sandbox?: boolean | SandboxConfiguration; // JS 沙箱开关与配置
-  fetch?: Function;                // Custom fetch function
-  streamTransformer?: Function;    // Stream transformer
-  nodeTransformer?: Function;      // Node transformer
-}
+| 选项 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `sandbox` | `boolean \| SandboxConfiguration` | `true` | 启用基于 Proxy 隔离膜的 [JavaScript 隔离](/zh-CN/concepts/js-sandbox)和[原生 ESM 支持](/zh-CN/concepts/esm-sandbox)。仅当旧应用必须在真实全局对象中运行时，才应设为 `false`；传入对象则在保持隔离的同时配置沙箱。 |
+| `fetch` | `typeof window.fetch` | `window.fetch` | 用于请求入口，以及由加载器处理的脚本、模块和样式的自定义 fetch。 |
+| `streamTransformer` | `() => TransformStream<string, string>` | — | 用于自定义 HTML 流式处理过程的可选转换流。 |
+| `nodeTransformer` | `NodeTransformer` | 内部默认值 | 在 `<script>`、`<link>` 和 `<style>` 节点进入真实 DOM 前进行转换。仅高级扩展场景需要覆盖。 |
+
+```ts
+type AppConfiguration =
+  Partial<Pick<LoaderOpts, 'fetch' | 'streamTransformer' | 'nodeTransformer'>> & {
+    sandbox?: boolean | SandboxConfiguration;
+  };
 ```
 
-`sandbox` 是 JS 隔离的唯一伞形入口：`false` 完全关闭隔离，`true`（默认值）以默认配置开启，传入 `SandboxConfiguration` 对象则在开启的同时配置底层 Compartment（`globals`、`incubatorContext`、模块 hook），以及 qiankun 宿主扩展 `plugins` 与 `styleIsolation`。完整形状见[配置](/zh-CN/api/configuration)。
+`sandbox` 是隔离能力的统一入口。它的对象形式承载 `styleIsolation`、`globals`、`incubatorContext`、`plugins` 以及 Compartment 模块钩子：
 
-### lifeCycles
-
-- **类型**: `LifeCycles<T>`
-- **必填**: ❌
-- **描述**: 此特定微应用的生命周期钩子
-
-## 🔄 返回值
-
-返回一个具有以下方法的 `MicroApp` 实例：
-
-```typescript
-interface MicroApp {
-  mount(): Promise<void>;          // Mount the micro app
-  unmount(): Promise<void>;        // Unmount the micro app
-  update(props: any): Promise<void>; // Update micro app props
-  getStatus(): string;             // Get current status
-  loadPromise: Promise<void>;      // Loading promise
-  mountPromise: Promise<void>;     // Mounting promise
-  unmountPromise: Promise<void>;   // Unmounting promise
-}
+```ts
+loadMicroApp(app, {
+  sandbox: {
+    styleIsolation: true,
+    globals: { TENANT_ID: 'acme' },
+  },
+});
 ```
 
-## 💡 使用示例
+完整的配置参考见 [AppConfiguration](/zh-CN/api/configuration)。
 
-### 基础用法
+### `lifeCycles?: LifeCycles<T>`
 
-```typescript
+可选的生命周期钩子，在该应用加载、挂载和卸载的相应阶段触发。每个钩子可以是单个函数或函数数组，签名均为 `(app, global)`，其中 `global` 表示经过沙箱隔离的 `window` 视图。
+
+```ts
+type LifeCycleFn<T extends ObjectType> = (app: LoadableApp<T>, global: WindowProxy) => Promise<void>;
+
+type LifeCycles<T extends ObjectType> = {
+  beforeLoad?: LifeCycleFn<T> | Array<LifeCycleFn<T>>;
+  beforeMount?: LifeCycleFn<T> | Array<LifeCycleFn<T>>;
+  afterMount?: LifeCycleFn<T> | Array<LifeCycleFn<T>>;
+  beforeUnmount?: LifeCycleFn<T> | Array<LifeCycleFn<T>>;
+  afterUnmount?: LifeCycleFn<T> | Array<LifeCycleFn<T>>;
+};
+```
+
+细节见[生命周期钩子](/zh-CN/api/lifecycles)。
+
+## 返回值
+
+`loadMicroApp` 返回 `MicroApp`，即 single-spa 的 Parcel 句柄：
+
+```ts
+type MicroApp = Parcel;
+
+type Parcel = {
+  mount(): Promise<null>;
+  unmount(): Promise<null>;
+  update?(customProps: object): Promise<any>;
+  getStatus():
+    | 'NOT_LOADED'
+    | 'LOADING_SOURCE_CODE'
+    | 'NOT_BOOTSTRAPPED'
+    | 'BOOTSTRAPPING'
+    | 'NOT_MOUNTED'
+    | 'MOUNTING'
+    | 'MOUNTED'
+    | 'UPDATING'
+    | 'UNMOUNTING'
+    | 'UNLOADING'
+    | 'SKIP_BECAUSE_BROKEN'
+    | 'LOAD_ERROR';
+  loadPromise: Promise<null>;
+  bootstrapPromise: Promise<null>;
+  mountPromise: Promise<null>;
+  unmountPromise: Promise<null>;
+};
+```
+
+| 成员 | 说明 |
+| --- | --- |
+| `mount()` | 挂载该 Parcel。`loadMicroApp` 会在加载时自动挂载，因此通常无需直接调用。 |
+| `unmount()` | 卸载应用、停用沙箱，并清理可追踪的副作用和容器 DOM。不再使用应用时必须调用。 |
+| `update?(props)` | 仅当微应用导出 `update` 生命周期时存在，用于向运行中的应用传递新的 props。 |
+| `getStatus()` | 返回当前生命周期状态，取值范围为上述联合类型。 |
+| `loadPromise` | 表示源码加载阶段完成的 Promise。 |
+| `bootstrapPromise` | 表示 bootstrap 阶段完成的 Promise。 |
+| `mountPromise` | 表示挂载阶段完成的 Promise。可等待该 Promise，以确认应用已完成渲染。 |
+| `unmountPromise` | 表示卸载阶段完成的 Promise。 |
+
+::: warning 处理 Promise 拒绝
+加载或挂载失败时，这些 Promise 会被拒绝。应通过 `.catch` 或 `try...catch` 处理错误，避免产生未处理的 Promise 拒绝。
+:::
+
+## 行为 {#behavior}
+
+- **调用后立即开始加载和挂载。** 无需预先调用 `start()`；如需等待应用完成渲染，应等待 `mountPromise`。
+- **一个容器在同一时刻只承载一个应用。** 如果连续向同一容器加载应用，后一个实例会等待前一个实例卸载。
+- **相同名称和容器可能复用已加载内容。** 不应依赖模块顶层代码在重新挂载时再次执行；每次挂载所需的状态应在 `mount()` 中初始化。
+- **调用方负责卸载。** 不再展示应用时应调用 `unmount()`，以便 qiankun 清空容器并释放能够追踪的资源和副作用。
+
+多实例、复用和重新挂载的完整建议见[运行多个微应用实例](/zh-CN/cookbook/run-multiple-instances)。
+
+## 示例
+
+以下示例先获取 `container` 元素并挂载应用，在不再需要该应用时将其卸载。
+
+```ts
 import { loadMicroApp } from 'qiankun';
 
-const microApp = loadMicroApp({
-  name: 'manual-app',
-  entry: '//localhost:8080',
-  container: '#manual-container',
-});
+const container = document.getElementById('micro-app-slot');
+if (!container) throw new Error('container not found');
 
-// The micro app will be automatically mounted
-```
-
-### 带自定义 Props
-
-```typescript
-const microApp = loadMicroApp({
-  name: 'dashboard',
-  entry: '//localhost:8080',
-  container: '#dashboard-container',
-  props: {
-    token: localStorage.getItem('token'),
-    userId: getCurrentUserId(),
-    theme: 'dark'
-  }
-});
-```
-
-### 带配置
-
-```typescript
-const microApp = loadMicroApp({
-  name: 'third-party-app',
-  entry: '//external.example.com',
-  container: '#external-container',
-}, {
-  sandbox: false, // Disable sandbox for legacy apps
-  fetch: customFetch, // Use custom fetch
-});
-
-// 也可以在开启沙箱的同时进行配置
-const configuredApp = loadMicroApp({
-  name: 'configured-app',
-  entry: '//localhost:8080',
-  container: '#configured-container',
-}, {
-  sandbox: {
-    styleIsolation: true,             // 样式收敛到应用容器内
-    globals: { FEATURE_FLAG: true },  // 应用专属全局变量
+const microApp = loadMicroApp(
+  {
+    name: 'app1',
+    entry: 'http://localhost:7101',
+    container,
+    props: { userId: 42 },
   },
-});
-```
+  { sandbox: true },
+);
 
-### 带生命周期钩子
+// 等待应用完成挂载
+await microApp.mountPromise;
+console.log(microApp.getStatus()); // 'MOUNTED'
 
-```typescript
-const microApp = loadMicroApp({
-  name: 'monitored-app',
-  entry: '//localhost:8080',
-  container: '#monitored-container',
-}, undefined, {
-  beforeMount: (app) => {
-    console.log('About to mount:', app.name);
-    showLoadingSpinner();
-  },
-  afterMount: (app) => {
-    console.log('Mounted successfully:', app.name);
-    hideLoadingSpinner();
-  },
-  beforeUnmount: (app) => {
-    console.log('About to unmount:', app.name);
-    saveUserState();
-  }
-});
-```
-
-## 🔧 高级用法
-
-### 条件动态加载
-
-```typescript
-async function loadAppConditionally(condition: boolean) {
-  if (condition) {
-    const microApp = loadMicroApp({
-      name: 'conditional-app',
-      entry: '//localhost:8080',
-      container: '#conditional-container',
-    });
-    
-    return microApp;
-  }
-  return null;
-}
-```
-
-### 加载多个应用
-
-```typescript
-function loadMultipleApps() {
-  const apps = [
-    { name: 'app1', entry: '//localhost:8001', container: '#container1' },
-    { name: 'app2', entry: '//localhost:8002', container: '#container2' },
-    { name: 'app3', entry: '//localhost:8003', container: '#container3' },
-  ];
-
-  const microApps = apps.map(app => loadMicroApp(app));
-  return microApps;
-}
-```
-
-### 手动控制
-
-```typescript
-const microApp = loadMicroApp({
-  name: 'controlled-app',
-  entry: '//localhost:8080',
-  container: '#controlled-container',
-});
-
-// Manual unmount
+// 不再需要时卸载应用
 await microApp.unmount();
-
-// Update props
-await microApp.update({ newData: 'updated' });
-
-// Check status
-console.log(microApp.getStatus()); // 'MOUNTED', 'UNMOUNTED', etc.
 ```
 
-## 🎭 用例场景
+如果旧应用无法在隔离环境中运行，可以关闭沙箱：
 
-### 1. 模态框/对话框应用
-
-```typescript
-function openAppModal() {
-  const modal = document.createElement('div');
-  modal.id = 'app-modal';
-  document.body.appendChild(modal);
-
-  const microApp = loadMicroApp({
-    name: 'modal-app',
-    entry: '//localhost:8080',
-    container: modal,
-    props: { 
-      onClose: () => {
-        microApp.unmount().then(() => {
-          document.body.removeChild(modal);
-        });
-      }
-    }
-  });
-
-  return microApp;
-}
+```ts
+const microApp = loadMicroApp(
+  { name: 'legacy-app', entry: 'http://localhost:7200', container },
+  { sandbox: false },
+);
 ```
 
-### 2. 基于标签页的应用
+::: tip React 和 Vue 组件
+如果主应用使用 React 或 Vue，也可以使用对应的 [`<MicroApp>`](/zh-CN/ecosystem/react) 组件管理容器引用、props 更新和实例卸载。组件内部采用与 `loadMicroApp` 相同的实例模型。
+:::
 
-```typescript
-class TabManager {
-  private activeTabs = new Map<string, MicroApp>();
+## 相关内容
 
-  async switchTab(tabName: string, config: LoadableApp) {
-    // Unmount current active tab
-    const currentApp = this.activeTabs.get('active');
-    if (currentApp) {
-      await currentApp.unmount();
-    }
-
-    // Load new tab
-    const newApp = loadMicroApp({
-      ...config,
-      container: '#tab-content'
-    });
-
-    this.activeTabs.set('active', newApp);
-    this.activeTabs.set(tabName, newApp);
-  }
-}
-```
-
-### 3. 组件系统
-
-```typescript
-class WidgetSystem {
-  loadWidget(widgetConfig: any) {
-    return loadMicroApp({
-      name: `widget-${widgetConfig.id}`,
-      entry: widgetConfig.url,
-      container: `#widget-${widgetConfig.id}`,
-      props: widgetConfig.props
-    }, {
-      sandbox: true // Isolate widgets
-    });
-  }
-}
-```
-
-## ⚠️ 重要注意事项
-
-### 容器管理
-
-```typescript
-// ❌ 错误：在没有适当清理的情况下重用容器
-loadMicroApp({ name: 'app1', entry: '//localhost:8001', container: '#shared' });
-loadMicroApp({ name: 'app2', entry: '//localhost:8002', container: '#shared' }); // Conflict!
-
-// ✅ 正确：使用唯一容器或适当清理
-const app1 = loadMicroApp({ name: 'app1', entry: '//localhost:8001', container: '#container1' });
-const app2 = loadMicroApp({ name: 'app2', entry: '//localhost:8002', container: '#container2' });
-```
-
-### 内存管理
-
-```typescript
-// ✅ 正确：适当清理
-const microApp = loadMicroApp({...});
-
-// When done, always unmount
-window.addEventListener('beforeunload', () => {
-  microApp.unmount();
-});
-```
-
-### 错误处理
-
-```typescript
-try {
-  const microApp = loadMicroApp({
-    name: 'potentially-failing-app',
-    entry: '//unreliable-server.com',
-    container: '#container',
-  });
-
-  // Wait for load
-  await microApp.loadPromise;
-  console.log('App loaded successfully');
-} catch (error) {
-  console.error('Failed to load micro app:', error);
-  // Handle error - show fallback UI, retry, etc.
-}
-```
-
-## 🆚 对比 registerMicroApps
-
-| 特性 | `loadMicroApp` | `registerMicroApps` |
-|------|----------------|---------------------|
-| **加载方式** | 手动，立即 | 自动，基于路由 |
-| **用例** | 动态加载、组件、模态框 | 主导航、SPA 路由 |
-| **生命周期** | 手动控制 | 路由自动控制 |
-| **性能** | 按需加载 | 可以预加载 |
-
-## 🚀 最佳实践
-
-### 1. 资源管理
-
-```typescript
-class MicroAppManager {
-  private apps = new Map<string, MicroApp>();
-
-  async loadApp(config: LoadableApp) {
-    // Check if already loaded
-    if (this.apps.has(config.name)) {
-      return this.apps.get(config.name);
-    }
-
-    const app = loadMicroApp(config);
-    this.apps.set(config.name, app);
-    
-    // Auto cleanup on unmount
-    app.unmountPromise.then(() => {
-      this.apps.delete(config.name);
-    });
-
-    return app;
-  }
-}
-```
-
-### 2. Props 管理
-
-```typescript
-// ✅ 正确：响应式 props
-function createReactiveMicroApp(baseConfig: LoadableApp) {
-  let currentApp: MicroApp;
-
-  return {
-    async updateProps(newProps: any) {
-      if (currentApp) {
-        await currentApp.update(newProps);
-      }
-    },
-    
-    async reload(newConfig: LoadableApp) {
-      if (currentApp) {
-        await currentApp.unmount();
-      }
-      currentApp = loadMicroApp({
-        ...baseConfig,
-        ...newConfig
-      });
-    }
-  };
-}
-```
-
-### 3. 错误边界
-
-```typescript
-function loadMicroAppWithFallback(config: LoadableApp, fallbackHTML: string) {
-  const microApp = loadMicroApp(config);
-  
-  microApp.loadPromise.catch((error) => {
-    console.error('Micro app failed to load:', error);
-    // Show fallback content
-    const container = typeof config.container === 'string' 
-      ? document.querySelector(config.container)
-      : config.container;
-    
-    if (container) {
-      container.innerHTML = fallbackHTML;
-    }
-  });
-
-  return microApp;
-}
-```
-
-## 🔗 相关 API
-
-- [registerMicroApps](/zh-CN/api/register-micro-apps) - 基于路由的微应用加载
-- [start](/zh-CN/api/start) - 启动 qiankun 框架
-- [生命周期](/zh-CN/api/lifecycles) - 详细的生命周期文档 
+- [registerMicroApps](/zh-CN/api/register-micro-apps)——根据路由自动激活和卸载应用。
+- [start](/zh-CN/api/start)——`loadMicroApp` 会自动调用该函数；路由驱动应用则需要显式调用。
+- [AppConfiguration](/zh-CN/api/configuration)——完整的配置项参考。
+- [生命周期钩子](/zh-CN/api/lifecycles)——`LifeCycles` 钩子的完整说明。
+- [微应用生命周期与 props](/zh-CN/concepts/lifecycle-and-props)——props 的传递方式与微应用生命周期。
+- [运行多个微应用实例](/zh-CN/cookbook/run-multiple-instances)——在同一页面运行多个实例的方法。

@@ -1,224 +1,218 @@
-# TypeScript Types
+# Types reference
 
-qiankun provides comprehensive TypeScript type definitions to ensure type safety and excellent developer experience. This document covers all available types and interfaces.
+This page lists the public types and `Window` augmentations exported from the `qiankun` package root. Import them directly from the package:
 
-## 📋 Core Types
+```ts
+import type {
+  ObjectType,
+  HTMLEntry,
+  AppMetadata,
+  LoadableApp,
+  RegistrableApp,
+  AppConfiguration,
+  SandboxConfiguration,
+  LifeCycleFn,
+  LifeCycles,
+  MicroApp,
+  MicroAppLifeCycles,
+  PrefetchStrategy,
+} from 'qiankun';
+```
 
-### ObjectType
+::: warning Coming from qiankun 2.x
+Three shapes changed in ways that will produce type errors if you port 2.x code verbatim:
 
-**Description**: Base type for generic object structures.
+- `entry` is a plain string (`HTMLEntry = string`). There is no object entry (`{ scripts, styles }`) and no `EntryOpts`.
+- `container` is an `HTMLElement`. A selector string such as `'#subapp-viewport'` is no longer accepted.
+- There is no `FrameworkConfiguration` type. Per-app configuration is `AppConfiguration`, and `start()` takes only single-spa's `StartOpts`.
 
-```typescript
+See [Migrate from qiankun 2.x](/cookbook/migrate-from-2x) for the full list.
+:::
+
+## Type overview
+
+| Type | Shape | Notes |
+| --- | --- | --- |
+| `ObjectType` | `Record<string, unknown>` | Base constraint for the props generic `T`. |
+| `HTMLEntry` | `string` | The micro-app's HTML entry URL. String only. |
+| `AppMetadata` | `{ name; entry }` | The minimal identity of a micro-app. |
+| `LoadableApp<T>` | `AppMetadata & { container; props? }` | Used with [`loadMicroApp`](/api/load-micro-app). `container` is an `HTMLElement`. |
+| `RegistrableApp<T>` | `LoadableApp<T> & { loader?; activeRule; configuration? }` | Used with [`registerMicroApps`](/api/register-micro-apps). |
+| `AppConfiguration` | loader options `& { sandbox? }` | Per-app runtime configuration. See [AppConfiguration](/api/configuration). |
+| `SandboxConfiguration` | `{ styleIsolation?; globals?; incubatorContext?; plugins?; …module hooks }` | The object form of `sandbox`. See [SandboxConfiguration](/api/configuration#sandboxconfiguration). |
+| `LifeCycleFn<T>` | `(app, global) => Promise<void>` | A single framework lifecycle hook. |
+| `LifeCycles<T>` | `{ beforeLoad?; beforeMount?; afterMount?; beforeUnmount?; afterUnmount? }` | Framework hooks. See [Lifecycle hooks](/api/lifecycles). |
+| `MicroApp` | single-spa `Parcel` | The handle returned by `loadMicroApp`. |
+| `MicroAppLifeCycles` | `{ bootstrap; mount; unmount; update? }` | The lifecycle exports a micro-app itself provides. |
+| `PrefetchStrategy` | `boolean \| 'all' \| string[] \| fn` | Exported for legacy compatibility; unused by any v3 API. |
+
+## ObjectType
+
+```ts
 export type ObjectType = Record<string, unknown>;
 ```
 
-**Usage**:
-```typescript
-// Used as a constraint for generic types
-function processApp<T extends ObjectType>(props: T): void {
-  // T can be any object type
-}
+The constraint used everywhere qiankun accepts a props generic `T`. When you type your own props object, it must extend `ObjectType`:
+
+```ts
+type Props = { userId: number; theme: 'light' | 'dark' };
+// Props satisfies Record<string, unknown>, so it is a valid T
 ```
 
-### HTMLEntry
+## HTMLEntry
 
-**Description**: Type for micro application entry points.
-
-```typescript
+```ts
 export type HTMLEntry = string;
 ```
 
-**Usage**:
-```typescript
-const appEntry: HTMLEntry = '//localhost:8080';
-const appEntryWithPath: HTMLEntry = '//localhost:8080/micro-app';
+The entry of a micro-app is always the URL of its HTML document. qiankun streams that HTML through the [HTML-entry loader](/concepts/html-entry-loading) and executes the scripts it references.
+
+```ts
+const entry: HTMLEntry = 'http://localhost:7101';
 ```
 
-## 🏗️ Application Types
+::: danger No object entry
+The qiankun 2.x `entry: { scripts: [...], styles: [...] }` form does not exist in v3. Point `entry` at an HTML page and let the loader discover its assets.
+:::
 
-### AppMetadata
+## AppMetadata
 
-**Description**: Base metadata for micro applications.
-
-```typescript
-type AppMetadata = {
-  name: string;    // Unique application name
-  entry: HTMLEntry; // Application entry URL
+```ts
+export type AppMetadata = {
+  name: string;
+  entry: HTMLEntry;
 };
 ```
 
-### LoadableApp\<T\>
+The minimal descriptor of a micro-app: a stable `name` and its HTML `entry`. `AppMetadata` is the base that `LoadableApp` and `RegistrableApp` extend, and it is the element type accepted by [`prefetchApps`](/api/prefetch-apps).
 
-**Description**: Configuration for manually loaded micro applications.
+## LoadableApp
 
-```typescript
+```ts
 export type LoadableApp<T extends ObjectType> = AppMetadata & {
-  container: HTMLElement;  // DOM container element
-  props?: T;              // Custom properties passed to the app
+  container: HTMLElement;
+  props?: T;
 };
 ```
 
-**Usage**:
-```typescript
-// Basic usage
-const app: LoadableApp<{}> = {
-  name: 'my-app',
-  entry: '//localhost:8080',
-  container: document.getElementById('app-container')!,
-};
+The descriptor for an app you mount imperatively with [`loadMicroApp`](/api/load-micro-app).
 
-// With custom props
-interface MyAppProps {
-  theme: 'light' | 'dark';
-  userId: string;
-}
+| Field | Type | Description |
+| --- | --- | --- |
+| `name` | `string` | Application identifier. Separate `loadMicroApp` instances may reuse it when they use different containers. |
+| `entry` | `HTMLEntry` | HTML entry URL. |
+| `container` | `HTMLElement` | The DOM element the app mounts into. Must be an element, not a selector. |
+| `props` | `T` (optional) | Props forwarded to the micro-app's lifecycle exports. |
 
-const appWithProps: LoadableApp<MyAppProps> = {
-  name: 'themed-app',
-  entry: '//localhost:8080',
-  container: document.getElementById('container')!,
-  props: {
-    theme: 'dark',
-    userId: '123'
-  }
-};
-```
-
-### RegistrableApp\<T\>
-
-**Description**: Configuration for route-based micro applications.
-
-```typescript
-export type RegistrableApp<T extends ObjectType> = LoadableApp<T> & {
-  loader?: (loading: boolean) => void;                    // Loading state callback
-  activeRule: RegisterApplicationConfig['activeWhen'];    // Routing activation rule
-  configuration?: AppConfiguration;                       // Per-app loading configuration
-};
-```
-
-**Usage**:
-```typescript
-import { registerMicroApps } from 'qiankun';
-
-interface UserAppProps {
-  currentUser: { id: string; name: string };
-}
-
-const apps: RegistrableApp<UserAppProps>[] = [
-  {
-    name: 'user-dashboard',
-    entry: '//localhost:8001',
-    container: '#subapp-viewport',
-    activeRule: '/dashboard',
-    props: {
-      currentUser: { id: '123', name: 'John' }
-    },
-    loader: (loading) => {
-      if (loading) {
-        showLoadingSpinner();
-      } else {
-        hideLoadingSpinner();
-      }
-    }
-  }
-];
-
-registerMicroApps(apps);
-```
-
-## ⚙️ Configuration Types
-
-### AppConfiguration
-
-**Description**: Configuration options for individual micro applications. The `sandbox` key is the single umbrella for JS isolation: `false` disables it entirely, `true` (the default) enables it with defaults, and an object enables it and configures the underlying Compartment.
-
-```typescript
-export type AppConfiguration = Partial<Pick<LoaderOpts, 'fetch' | 'streamTransformer' | 'nodeTransformer'>> & {
-  sandbox?: boolean | SandboxConfiguration; // JS sandbox switch and configuration
-};
-```
-
-### SandboxConfiguration
-
-**Description**: The umbrella configuration for the JS sandbox — structurally a public projection of `CompartmentOptions` plus two qiankun host extensions (`plugins`, `styleIsolation`).
-
-```typescript
-export type SandboxConfiguration = Pick<
-  CompartmentOptions,
-  'globals' | 'incubatorContext' | 'modules' | 'resolveHook' | 'importHook' | 'loadHook'
-> & {
-  plugins?: readonly IsolationPlugin[]; // Isolation plugins appended after qiankun's built-in plugins
-  styleIsolation?: boolean;             // Scope all micro-app styles to the app container via CSS @scope
-};
-```
-
-**Usage**:
-```typescript
+```ts
 import { loadMicroApp } from 'qiankun';
 
-const customConfig: AppConfiguration = {
-  sandbox: {
-    styleIsolation: true,
-    globals: { FEATURE_FLAG: true },
-  },
-  fetch: async (url, options) => {
-    // Custom fetch implementation
-    return fetch(url, {
-      ...options,
-      headers: {
-        ...options?.headers,
-        'Authorization': 'Bearer token'
-      }
-    });
-  },
-  nodeTransformer: (node, opts) => {
-    // Transform DOM nodes
-    if (node.tagName === 'SCRIPT') {
-      node.setAttribute('data-app', 'my-app');
-    }
-    return node;
-  }
-};
-
-loadMicroApp({
-  name: 'configured-app',
-  entry: '//localhost:8080',
-  container: document.getElementById('container')!
-}, customConfig);
+const container = document.getElementById('subapp')!;
+const app = loadMicroApp<{ userId: number }>({
+  name: 'app1',
+  entry: 'http://localhost:7101',
+  container,
+  props: { userId: 42 },
+});
 ```
 
-## 🔄 Lifecycle Types
+::: warning container is an HTMLElement
+`container: '#subapp'` compiles in 2.x but is a type error in v3. Resolve the element yourself, for example with `document.getElementById(...)` or a framework ref.
+:::
 
-### LifeCycleFn\<T\>
+## RegistrableApp
 
-**Description**: Type for lifecycle hook functions.
+```ts
+export type RegistrableApp<T extends ObjectType> = LoadableApp<T> & {
+  loader?: (loading: boolean) => void;
+  activeRule: RegisterApplicationConfig['activeWhen'];
+  configuration?: AppConfiguration;
+};
+```
 
-```typescript
+The descriptor for a route-driven app you hand to [`registerMicroApps`](/api/register-micro-apps). It extends `LoadableApp` with three route/loading fields.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `loader` | `(loading: boolean) => void` (optional) | Reports route-app loading state. Treat the value as state because `true` may be reported more than once before the final `false`. |
+| `activeRule` | single-spa `Activity` | When the app is active. A path prefix string, an `(location) => boolean` function, or an array mixing both. |
+| `configuration` | `AppConfiguration` (optional) | Per-app runtime configuration, merged over the framework defaults. |
+
+`activeRule` is single-spa's `activeWhen` type — `string | ((location: Location) => boolean) | Array<string | ((location: Location) => boolean)>`:
+
+```ts
+import { registerMicroApps } from 'qiankun';
+
+registerMicroApps([
+  {
+    name: 'app1',
+    entry: 'http://localhost:7100',
+    container: document.getElementById('subapp')!,
+    activeRule: '/app1',
+    configuration: { sandbox: { styleIsolation: true } },
+  },
+]);
+```
+
+## AppConfiguration
+
+```ts
+export type AppConfiguration = Partial<
+  Pick<LoaderOpts, 'fetch' | 'streamTransformer' | 'nodeTransformer'>
+> & {
+  sandbox?: boolean | SandboxConfiguration;
+};
+```
+
+The per-app runtime configuration. It is the second argument to [`loadMicroApp`](/api/load-micro-app) and the `configuration` field of `RegistrableApp`.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `fetch` | `typeof window.fetch` | `window.fetch` | Custom fetch for the entry and loader-managed scripts, modules, and styles. |
+| `streamTransformer` | `() => TransformStream<string, string>` | `undefined` | A transform piped into the HTML stream while it loads. |
+| `nodeTransformer` | `<T extends Node>(node: T, opts) => T` | internal default | Rewrites script / link / style nodes before they enter the container. |
+| `sandbox` | `boolean \| SandboxConfiguration` | `true` | Enables the [JS sandbox](/concepts/js-sandbox) membrane and, where applicable, the [ESM sandbox](/concepts/esm-sandbox). The object form also configures it. |
+
+See [AppConfiguration](/api/configuration) for field behavior and defaults.
+
+## SandboxConfiguration
+
+```ts
+export type SandboxConfiguration = Pick<
+  CreateSandboxOptions,
+  | 'globals'
+  | 'incubatorContext'
+  | 'modules'
+  | 'resolveHook'
+  | 'importHook'
+  | 'loadHook'
+  | 'plugins'
+  | 'styleIsolation'
+>;
+```
+
+The object form of `sandbox` — structurally a public projection of the sandbox's `CompartmentOptions` plus the two host extensions `plugins` and `styleIsolation`.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `styleIsolation` | `boolean` | `false` | Enables runtime CSS `@scope` [style isolation](/concepts/style-isolation) scoped to the app container. |
+| `globals` | `CompartmentGlobals` | `{}` | Values or property descriptors installed on the app's compartment global. |
+| `incubatorContext` | `WindowProxy` | `window` | The host context that incubates the sandbox. |
+| `plugins` | `readonly IsolationPlugin[]` | `[]` | Isolation plugins appended after the built-in ones. |
+| `modules` / `resolveHook` / `importHook` / `loadHook` | Compartment module hooks | `undefined` | Module resolution and loading hooks for sandboxed ESM. |
+
+::: danger No 2.x sandbox object, no FrameworkConfiguration
+`sandbox` is a boolean or a `SandboxConfiguration`. The 2.x object form `sandbox: { strictStyleIsolation, experimentalStyleIsolation }` and Shadow DOM isolation are gone; style isolation is `sandbox.styleIsolation`, implemented with CSS `@scope`. There is no `FrameworkConfiguration` type, and `start()` accepts no sandbox, prefetch, or singular options.
+:::
+
+## LifeCycleFn and LifeCycles
+
+```ts
 export type LifeCycleFn<T extends ObjectType> = (
-  app: LoadableApp<T>, 
-  global: WindowProxy
+  app: LoadableApp<T>,
+  global: WindowProxy,
 ) => Promise<void>;
-```
 
-**Usage**:
-```typescript
-const beforeLoadHook: LifeCycleFn<{ theme: string }> = async (app, global) => {
-  console.log(`Loading app: ${app.name}`);
-  global.__APP_THEME__ = app.props?.theme || 'default';
-};
-
-const afterMountHook: LifeCycleFn<any> = async (app, global) => {
-  console.log(`App ${app.name} mounted successfully`);
-  // Track analytics
-  analytics.track('app_mounted', { appName: app.name });
-};
-```
-
-### LifeCycles\<T\>
-
-**Description**: Complete lifecycle hooks configuration.
-
-```typescript
 export type LifeCycles<T extends ObjectType> = {
   beforeLoad?: LifeCycleFn<T> | Array<LifeCycleFn<T>>;
   beforeMount?: LifeCycleFn<T> | Array<LifeCycleFn<T>>;
@@ -228,412 +222,166 @@ export type LifeCycles<T extends ObjectType> = {
 };
 ```
 
-**Usage**:
-```typescript
-interface AppProps {
-  userId: string;
-  permissions: string[];
-}
+The framework-level hooks you pass as the optional last argument to `registerMicroApps` and `loadMicroApp`. Each hook is one function or an array of them, run in order. The second argument, `global`, is the sandbox-proxied `window` for that app, not the real `window`.
 
-const lifecycles: LifeCycles<AppProps> = {
-  beforeLoad: async (app, global) => {
-    // Setup before loading
-    global.__USER_ID__ = app.props?.userId;
-  },
-  
-  beforeMount: [
-    async (app, global) => {
-      // Multiple hooks as array
-      await setupAuthentication(app.props?.userId);
-    },
-    async (app, global) => {
-      await loadUserPermissions(app.props?.permissions);
-    }
+```ts
+const lifeCycles: LifeCycles<Record<string, unknown>> = {
+  beforeLoad: async (app) => console.log('before load', app.name),
+  afterMount: [
+    async (app, global) => console.log('mounted into', app.container, global),
   ],
-  
-  afterMount: async (app) => {
-    console.log(`${app.name} is ready`);
-  },
-  
-  beforeUnmount: async (app) => {
-    // Cleanup before unmounting
-    await saveUserState(app.name);
-  },
-  
-  afterUnmount: async (app) => {
-    // Final cleanup
-    await clearUserData(app.name);
-  }
 };
 ```
 
-## 🎯 Micro App Types
+::: info Two distinct lifecycle types
+`LifeCycles` (the five framework hooks above) is separate from `MicroAppLifeCycles` (the `bootstrap`/`mount`/`unmount`/`update` a micro-app exports about itself). See [Micro-app lifecycle and props](/concepts/lifecycle-and-props).
+:::
 
-### MicroApp
+## MicroApp
 
-**Description**: Instance of a loaded micro application.
-
-```typescript
+```ts
+import type { Parcel } from '@qiankunjs/single-spa';
 export type MicroApp = Parcel;
 ```
 
-The `MicroApp` type extends the single-spa `Parcel` interface with these methods:
+The handle returned by [`loadMicroApp`](/api/load-micro-app). It is a `Parcel` from `@qiankunjs/single-spa` — qiankun's vendored single-spa fork, already installed as a dependency — giving you imperative control plus promises for each phase. Import routing helpers from that package too, never from the separate `single-spa` package, which would set up a second, independent router.
 
-```typescript
-interface MicroApp {
-  mount(): Promise<void>;           // Mount the application
-  unmount(): Promise<void>;         // Unmount the application  
-  update(props: any): Promise<void>; // Update application props
-  getStatus(): string;              // Get current status
-  loadPromise: Promise<void>;       // Promise that resolves when loaded
-  mountPromise: Promise<void>;      // Promise that resolves when mounted
-  unmountPromise: Promise<void>;    // Promise that resolves when unmounted
-}
+| Member | Type | Description |
+| --- | --- | --- |
+| `mount()` | `() => Promise<null>` | Mount the app. |
+| `unmount()` | `() => Promise<null>` | Unmount the app. |
+| `update?(props)` | `(props) => Promise<any>` | Push new props, when the app exports an `update` hook. |
+| `getStatus()` | `() => Status` | Current lifecycle status (union below). |
+| `loadPromise` | `Promise<null>` | Resolves when source code has loaded. |
+| `bootstrapPromise` | `Promise<null>` | Resolves when bootstrap completes. |
+| `mountPromise` | `Promise<null>` | Resolves when mount completes. |
+| `unmountPromise` | `Promise<null>` | Resolves when unmount completes. |
+
+`getStatus()` returns one of single-spa's status strings:
+
+```ts
+type Status =
+  | 'NOT_LOADED'
+  | 'LOADING_SOURCE_CODE'
+  | 'NOT_BOOTSTRAPPED'
+  | 'BOOTSTRAPPING'
+  | 'NOT_MOUNTED'
+  | 'MOUNTING'
+  | 'MOUNTED'
+  | 'UPDATING'
+  | 'UNMOUNTING'
+  | 'UNLOADING'
+  | 'SKIP_BECAUSE_BROKEN'
+  | 'LOAD_ERROR';
 ```
 
-**Usage**:
-```typescript
-import { loadMicroApp } from 'qiankun';
-
-const microApp: MicroApp = loadMicroApp({
-  name: 'my-app',
-  entry: '//localhost:8080',
-  container: document.getElementById('container')!
-});
-
-// Check status
-console.log(microApp.getStatus()); // 'LOADING', 'MOUNTED', 'UNMOUNTED', etc.
-
-// Wait for mounting
-await microApp.mountPromise;
-console.log('App is mounted');
-
-// Update props
-await microApp.update({ newTheme: 'dark' });
-
-// Unmount when done
-await microApp.unmount();
+```ts
+const app = loadMicroApp({ name: 'app1', entry, container });
+await app.mountPromise;
+console.log(app.getStatus()); // 'MOUNTED'
+await app.unmount();
 ```
 
-### MicroAppLifeCycles
+## MicroAppLifeCycles
 
-**Description**: Internal lifecycle type used by qiankun.
-
-```typescript
+```ts
+type ExtraProps = { container: HTMLElement };
 export type MicroAppLifeCycles = FlattenArrayValue<ParcelLifeCycles<ExtraProps>>;
 ```
 
-This type is primarily for internal use and represents the flattened lifecycle functions that micro applications must export.
+The shape of the lifecycle object a micro-app exports for qiankun to drive it. After flattening single-spa's array form, it resolves to:
 
-## 🌐 Global Types
+```ts
+type MicroAppLifeCycles = {
+  bootstrap: (props) => Promise<void>;
+  mount: (props) => Promise<void>;
+  unmount: (props) => Promise<void>;
+  update?: (props) => Promise<void>;
+};
+```
 
-### Window Extensions
+Every lifecycle receives the data passed through `props`. qiankun additionally injects `container: HTMLElement` only when it calls `mount` and `unmount`; `bootstrap` and `update` should not rely on that field. A micro-app's entry exports these:
 
-qiankun extends the global `Window` interface with special properties:
+```ts
+let root: { unmount(): void } | null = null;
 
-```typescript
+export async function bootstrap() {}
+export async function mount(props: { container: HTMLElement }) {
+  root = render(props.container); // render and keep the handle
+}
+export async function unmount() {
+  root?.unmount(); // tear down the rendered tree
+  root = null;
+}
+```
+
+## PrefetchStrategy
+
+```ts
+export type PrefetchStrategy =
+  | boolean
+  | 'all'
+  | string[]
+  | ((apps: AppMetadata[]) => {
+      criticalAppNames: string[];
+      minorAppsName: string[];
+    });
+```
+
+::: warning Exported but unused
+`PrefetchStrategy` is a legacy type kept for source compatibility. No v3 public API consumes it — the streaming loader preloads automatically, and [`prefetchApps`](/api/prefetch-apps) is deprecated. It is documented here only because it is still exported.
+:::
+
+## Window augmentations
+
+qiankun augments the global `Window` interface. These properties are how a micro-app detects it is running under qiankun and how the runtime cooperates with zone-based frameworks.
+
+```ts
 declare global {
   interface Window {
-    __POWERED_BY_QIANKUN__?: boolean;           // Indicates app is running in qiankun
-    __INJECTED_PUBLIC_PATH_BY_QIANKUN__?: string; // Injected public path
-    __QIANKUN_DEVELOPMENT__?: boolean;          // Development mode flag
-    Zone?: CallableFunction;                    // Zone.js compatibility
-    __zone_symbol__setTimeout?: Window['setTimeout']; // Zone.js timeout
+    __POWERED_BY_QIANKUN__?: boolean;
+    __INJECTED_PUBLIC_PATH_BY_QIANKUN__?: string;
+    __QIANKUN_DEVELOPMENT__?: boolean;
+    Zone?: CallableFunction;
+    __zone_symbol__setTimeout?: Window['setTimeout'];
   }
 }
 ```
 
-**Usage in Micro Applications**:
-```typescript
-// Check if running in qiankun
+| Property | Type | Description |
+| --- | --- | --- |
+| `__POWERED_BY_QIANKUN__` | `boolean` | Set on the sandboxed global when the app runs inside qiankun. Read it to branch standalone vs. embedded behavior. |
+| `__INJECTED_PUBLIC_PATH_BY_QIANKUN__` | `string` | The runtime public path qiankun injects so the app resolves its assets from the correct origin. |
+| `__QIANKUN_DEVELOPMENT__` | `boolean` | Set when qiankun runs in development mode, enabling extra dev-time diagnostics. |
+| `Zone` | `CallableFunction` | Present when zone.js is loaded (for example Angular). qiankun accounts for it so patched timers behave correctly. |
+| `__zone_symbol__setTimeout` | `Window['setTimeout']` | zone.js's saved reference to the original `setTimeout`, used to reach the unpatched timer when zone.js is active. |
+
+A micro-app typically reads the first two to adapt at runtime:
+
+```ts
+// Inside the micro-app
 if (window.__POWERED_BY_QIANKUN__) {
-  console.log('Running as a micro app');
-  
-  // Use injected public path
-  const publicPath = window.__INJECTED_PUBLIC_PATH_BY_QIANKUN__ || '/';
-  
-  // Configure your app accordingly
-  setupApp({ publicPath });
+  // running under qiankun: export bootstrap/mount/unmount
 } else {
-  console.log('Running standalone');
-  setupApp({ publicPath: '/' });
+  // running standalone
+  render(document.getElementById('root'));
+}
+
+// Align the module public path with qiankun's injected value (webpack)
+if (window.__POWERED_BY_QIANKUN__) {
+  // eslint-disable-next-line no-undef, camelcase
+  __webpack_public_path__ = window.__INJECTED_PUBLIC_PATH_BY_QIANKUN__;
 }
 ```
 
-## 🎨 Utility Types
+::: tip Global augmentation is automatic
+Importing anything from `qiankun` pulls in this `declare global` block, so `window.__POWERED_BY_QIANKUN__` is typed in your project without extra setup. In a micro-app that does not depend on `qiankun`, add your own `declare global` block with the same properties.
+:::
 
-### Custom Type Guards
+## See also
 
-Create type guards for better type safety:
-
-```typescript
-// Type guard for LoadableApp
-function isLoadableApp<T extends ObjectType>(
-  app: any
-): app is LoadableApp<T> {
-  return (
-    typeof app === 'object' &&
-    typeof app.name === 'string' &&
-    typeof app.entry === 'string' &&
-    app.container instanceof HTMLElement
-  );
-}
-
-// Type guard for RegistrableApp
-function isRegistrableApp<T extends ObjectType>(
-  app: any
-): app is RegistrableApp<T> {
-  return (
-    isLoadableApp(app) &&
-    (typeof app.activeRule === 'string' || typeof app.activeRule === 'function')
-  );
-}
-
-// Usage
-function processApp(app: unknown) {
-  if (isRegistrableApp(app)) {
-    // TypeScript knows app is RegistrableApp here
-    console.log(`Registering app: ${app.name} with rule: ${app.activeRule}`);
-  } else if (isLoadableApp(app)) {
-    // TypeScript knows app is LoadableApp here
-    console.log(`Loading app: ${app.name}`);
-  }
-}
-```
-
-### Generic Helper Types
-
-Create reusable generic types for common patterns:
-
-```typescript
-// Props with theme support
-type ThemedProps<T = {}> = T & {
-  theme?: 'light' | 'dark';
-};
-
-// Props with user context
-type UserAwareProps<T = {}> = T & {
-  currentUser?: {
-    id: string;
-    name: string;
-    role: string;
-  };
-};
-
-// Combined props
-type AppProps<T = {}> = ThemedProps<UserAwareProps<T>>;
-
-// Usage
-const app: LoadableApp<AppProps<{ customData: string }>> = {
-  name: 'themed-user-app',
-  entry: '//localhost:8080',
-  container: document.getElementById('container')!,
-  props: {
-    theme: 'dark',
-    currentUser: { id: '123', name: 'John', role: 'admin' },
-    customData: 'custom value'
-  }
-};
-```
-
-## 📖 Advanced Type Patterns
-
-### Conditional Types for Configuration
-
-```typescript
-// Configuration based on environment
-type EnvironmentConfig<T extends 'development' | 'production'> = T extends 'development'
-  ? {
-      sandbox: false;
-      prefetch: false;
-    }
-  : {
-      sandbox: { styleIsolation: true };
-      prefetch: 'all';
-    };
-
-// Usage with environment detection
-declare const NODE_ENV: 'development' | 'production';
-type CurrentConfig = EnvironmentConfig<typeof NODE_ENV>;
-```
-
-### Branded Types for App Names
-
-```typescript
-// Create branded type for app names to prevent mix-ups
-type AppName = string & { readonly __brand: unique symbol };
-
-function createAppName(name: string): AppName {
-  return name as AppName;
-}
-
-// Enhanced LoadableApp with branded name
-type SafeLoadableApp<T extends ObjectType> = Omit<LoadableApp<T>, 'name'> & {
-  name: AppName;
-};
-
-// Usage
-const appName = createAppName('my-secure-app');
-const app: SafeLoadableApp<{}> = {
-  name: appName, // Type-safe app name
-  entry: '//localhost:8080',
-  container: document.getElementById('container')!
-};
-```
-
-### Lifecycle Event Types
-
-```typescript
-// Enhanced lifecycle with event data
-type LifeCycleEvent<T extends ObjectType> = {
-  app: LoadableApp<T>;
-  global: WindowProxy;
-  timestamp: number;
-  phase: 'beforeLoad' | 'beforeMount' | 'afterMount' | 'beforeUnmount' | 'afterUnmount';
-};
-
-type EnhancedLifeCycleFn<T extends ObjectType> = (event: LifeCycleEvent<T>) => Promise<void>;
-
-// Usage
-const enhancedHook: EnhancedLifeCycleFn<{ userId: string }> = async (event) => {
-  console.log(`Phase: ${event.phase}, App: ${event.app.name}, Time: ${event.timestamp}`);
-  
-  if (event.phase === 'beforeMount') {
-    // Setup user context
-    event.global.__USER_ID__ = event.app.props?.userId;
-  }
-};
-```
-
-## 🔍 Type Inference Examples
-
-### Automatic Props Type Inference
-
-```typescript
-// Helper function with automatic type inference
-function createTypedApp<T extends ObjectType>(
-  config: {
-    name: string;
-    entry: string;
-    container: HTMLElement;
-    props: T;
-  }
-): LoadableApp<T> {
-  return config; // TypeScript infers the correct type
-}
-
-// Usage - TypeScript automatically infers the props type
-const app = createTypedApp({
-  name: 'inferred-app',
-  entry: '//localhost:8080',
-  container: document.getElementById('container')!,
-  props: {
-    theme: 'dark',
-    userId: '123',
-    features: ['feature1', 'feature2']
-  }
-  // TypeScript knows props type is { theme: string; userId: string; features: string[] }
-});
-```
-
-### Lifecycle Type Inference
-
-```typescript
-// Helper for creating typed lifecycles
-function createLifecycles<T extends ObjectType>(
-  lifecycles: LifeCycles<T>
-): LifeCycles<T> {
-  return lifecycles;
-}
-
-// Usage with inference
-const typedLifecycles = createLifecycles({
-  beforeMount: async (app) => {
-    // TypeScript infers app.props type based on usage
-    console.log(app.props?.theme); // TypeScript knows this might be undefined
-  }
-});
-```
-
-## ⚡ Best Practices
-
-### 1. Use Strict Types
-
-```typescript
-// ✅ Good: Strict typing
-interface StrictAppProps {
-  readonly userId: string;
-  readonly theme: 'light' | 'dark';
-  readonly permissions: readonly string[];
-}
-
-const app: LoadableApp<StrictAppProps> = {
-  name: 'strict-app',
-  entry: '//localhost:8080',
-  container: document.getElementById('container')!,
-  props: {
-    userId: '123',
-    theme: 'dark',
-    permissions: ['read', 'write']
-  }
-};
-
-// ❌ Bad: Loose typing
-const looseApp: LoadableApp<any> = {
-  name: 'loose-app',
-  entry: '//localhost:8080',
-  container: document.getElementById('container')!,
-  props: { anything: 'goes' } // No type safety
-};
-```
-
-### 2. Create Domain-Specific Types
-
-```typescript
-// Create types specific to your domain
-interface ECommerceAppProps {
-  cartId: string;
-  currency: 'USD' | 'EUR' | 'GBP';
-  customerSegment: 'premium' | 'standard';
-  features: {
-    wishlist: boolean;
-    recommendations: boolean;
-    reviews: boolean;
-  };
-}
-
-type ECommerceApp = LoadableApp<ECommerceAppProps>;
-type ECommerceLifecycles = LifeCycles<ECommerceAppProps>;
-```
-
-### 3. Use Generic Constraints
-
-```typescript
-// Constrain generic types for better type safety
-interface BaseAppProps {
-  version: string;
-  environment: 'development' | 'staging' | 'production';
-}
-
-function createApp<T extends BaseAppProps>(
-  config: Omit<LoadableApp<T>, 'container'> & {
-    containerId: string;
-  }
-): LoadableApp<T> {
-  const container = document.getElementById(config.containerId);
-  if (!container) {
-    throw new Error(`Container ${config.containerId} not found`);
-  }
-  
-  return {
-    ...config,
-    container
-  };
-}
-```
-
-## 🔗 Related Documentation
-
-- [API Reference](/api/) - Main API documentation
-- [Lifecycles](/api/lifecycles) - Detailed lifecycle documentation
-- [Configuration](/api/configuration) - Configuration options
+- [AppConfiguration](/api/configuration) — every configuration field in depth
+- [Lifecycle hooks (LifeCycles)](/api/lifecycles) — the framework hooks reference
+- [registerMicroApps](/api/register-micro-apps) and [loadMicroApp](/api/load-micro-app) — where these types are consumed
+- [Micro-app lifecycle and props](/concepts/lifecycle-and-props) — how mount props flow to a micro-app
+- [Migrate from qiankun 2.x](/cookbook/migrate-from-2x) — the breaking type changes in one place
