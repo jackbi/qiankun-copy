@@ -1,0 +1,5 @@
+---
+"qiankun": minor
+---
+
+feat: introduce create qiankun cli (#2700)
