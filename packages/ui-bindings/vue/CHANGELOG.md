@@ -1,5 +1,29 @@
 # @qiankunjs/vue
 
+## 0.1.0-rc.4
+
+### Minor Changes
+
+- feat(qiankun): unload micro app generations and release owned resources (#3204)
+- feat(ui-bindings): add MicroAppLink navigation components (#3195)
+- feat: refactor-microapp (#2853)
+- feat: add typed exports for published packages (#3189)
+- feat(vue): introduce vue component binding (#2775)
+
+### Patch Changes
+
+- fix(qiankun): bound instance reuse and isolate bootstrap context (#3183)
+- fix: remove unused umd bundle configuration (#2879)
+- fix(vue): add unmount hook to unmount application (#2849)
+- Updated dependencies
+- Updated dependencies
+- Updated dependencies
+- Updated dependencies
+- Updated dependencies
+- Updated dependencies
+- Updated dependencies
+  - @qiankunjs/ui-shared@0.1.0-rc.3
+
 ## 0.0.1-rc.3
 
 ### Patch Changes
