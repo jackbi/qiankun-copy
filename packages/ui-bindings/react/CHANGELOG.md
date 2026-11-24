@@ -1,5 +1,36 @@
 # @qiankunjs/react
 
+## 0.1.0-rc.16
+
+### Minor Changes
+
+- feat(qiankun): unload micro app generations and release owned resources (#3204)
+- feat(ui-bindings): add MicroAppLink navigation components (#3195)
+- feat(sandbox): support dynamic sync scripts executed by order in sandbox (#2776)
+- feat(loader): add lru cache for assets fetch by default (#2794)
+- feat: refactor-microapp (#2853)
+- feat: add typed exports for published packages (#3189)
+- feat: not rebind non-native global properties (#2742)
+- feat: extract NodeTransformer type to shared package (#2808)
+- feat(vue): introduce vue component binding (#2775)
+
+### Patch Changes
+
+- fix: preserve teardown during updates and release asset ownership (#3215)
+- fix(sandbox): should get container from getter function while accessing (#2781)
+- fix(qiankun): bound instance reuse and isolate bootstrap context (#3183)
+- fix: remove unused umd bundle configuration (#2879)
+- fix(sandbox): should get container from getter function in every accessing
+- fix: strengthen browser behavior coverage and runtime isolation (#3224)
+- Updated dependencies
+- Updated dependencies
+- Updated dependencies
+- Updated dependencies
+- Updated dependencies
+- Updated dependencies
+- Updated dependencies
+  - @qiankunjs/ui-shared@0.1.0-rc.3
+
 ## 0.0.1-rc.15
 
 ### Patch Changes

@@ -1,5 +1,23 @@
 # @qiankunjs/ui-shared
 
+## 0.1.0-rc.3
+
+### Minor Changes
+
+- feat(qiankun): unload micro app generations and release owned resources (#3204)
+- feat(ui-bindings): add MicroAppLink navigation components (#3195)
+- feat: refactor-microapp (#2853)
+- feat: add typed exports for published packages (#3189)
+- feat(vue): introduce vue component binding (#2775)
+
+### Patch Changes
+
+- fix: preserve teardown during updates and release asset ownership (#3215)
+- fix: remove unused umd bundle configuration (#2879)
+- Updated dependencies
+- Updated dependencies
+  - @qiankunjs/single-spa@0.1.0-rc.2
+
 ## 0.1.0-rc.2
 
 ### Minor Changes
